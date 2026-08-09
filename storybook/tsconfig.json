@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": [".storybook", "stories", "support"]
+}

@@ -5,8 +5,11 @@ on:
     branches: [main]
     paths:
       - 'examples/demo/**'
+      - 'storybook/**'
       - 'packages/core/**'
       - 'packages/react/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
       - 'pnpm-lock.yaml'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -43,6 +46,14 @@ jobs:
 
       - name: Build demo
         run: pnpm --filter @acp-components/demo build
+
+      - name: Build Storybook
+        run: pnpm build:storybook
+
+      - name: Add Storybook to the Pages artifact
+        run: |
+          mkdir -p examples/demo/dist/storybook
+          cp -R storybook/storybook-static/. examples/demo/dist/storybook/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

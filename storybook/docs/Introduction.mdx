@@ -1,0 +1,38 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Introduction" />
+
+# ACP Components
+
+This Storybook documents the public React components for Agent Client Protocol hosts.
+It runs as a private workspace and imports components through `@acp-components/react`,
+the same entry point used by consumers.
+
+Use the toolbar to inspect every story in the dark or light theme and in English
+or Chinese. Stories that depend on ACP sessions, platform capabilities, files, or
+permissions run against deterministic in-memory fixtures and never connect to a
+real agent.
+
+## Documentation structure
+
+- **Foundations** covers design tokens and theme behavior.
+- **Components** documents individual public components and their states.
+- **Providers** documents public provider components and their child contracts.
+- **Patterns** demonstrates flows composed from multiple components.
+- **Pages** covers full application surfaces with realistic ACP state.
+
+## Runtime providers
+
+The preview recreates the package's provider contract without starting a transport:
+
+```text
+PlatformContext
+  -> HotkeysProvider
+    -> I18nProvider
+      -> SettingsContext
+        -> AcpContext
+          -> Story
+```
+
+State-backed stories reset the core Zustand stores before seeding their own data,
+so switching between stories cannot leak sessions, permissions, files, or skills.

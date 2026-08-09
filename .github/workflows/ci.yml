@@ -44,3 +44,6 @@ jobs:
 
       - name: Build demo
         run: pnpm --filter @acp-components/demo build
+
+      - name: Build Storybook
+        run: pnpm build:storybook

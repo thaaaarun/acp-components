@@ -7,3 +7,6 @@ examples/tauri/src-tauri/target
 .bitfun/
 .claude
 .agents
+.npm-cache
+.pnpm-store
+storybook/storybook-static

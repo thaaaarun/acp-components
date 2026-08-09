@@ -1,6 +1,7 @@
 packages:
   - 'packages/*'
   - 'examples/*'
+  - 'storybook'
 allowBuilds:
   '@parcel/watcher': true
   esbuild: true
