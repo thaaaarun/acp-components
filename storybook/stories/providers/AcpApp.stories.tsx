@@ -3,7 +3,7 @@ import { AcpApp } from '@acp-components/react';
 import { createMockPlatform } from '../../support/createMockPlatform';
 
 const meta = {
-  title: 'Providers/Acp App',
+  title: 'Layer 3 - Pages & Patterns/Compositions/Acp App',
   component: AcpApp,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },
@@ -18,4 +18,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ProviderStack: Story = {};
-export const LightTheme: Story = { args: { theme: 'light' } };
+export const LightTheme: Story = {
+  args: { theme: 'light' },
+  globals: { theme: 'light' },
+};

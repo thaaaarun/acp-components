@@ -20,7 +20,7 @@ function InteractiveTree(props: FileTreeProps) {
 }
 
 const meta = {
-  title: 'Components/File Tree',
+  title: 'Layer 1 - Props & Context/Components/File Tree',
   component: FileTree,
   tags: ['autodocs'],
   parameters: { frame: 'padded' },

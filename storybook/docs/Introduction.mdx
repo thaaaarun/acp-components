@@ -16,10 +16,18 @@ real agent.
 ## Documentation structure
 
 - **Foundations** covers design tokens and theme behavior.
-- **Components** documents individual public components and their states.
-- **Providers** documents public provider components and their child contracts.
-- **Patterns** demonstrates flows composed from multiple components.
-- **Pages** covers full application surfaces with realistic ACP state.
+- **Layer 1 - Props & Context** contains components driven by props, local state,
+  or lightweight ambient contexts such as i18n, platform, settings, and hotkeys.
+- **Layer 2 - Store Driven** contains components and providers that read or write
+  ACP Zustand stores directly, through package hooks, or through store-owned
+  children and synchronization sidecars.
+- **Layer 3 - Pages & Patterns** contains complete pages, application shells, and
+  cross-component compositions. This classification takes precedence when a page
+  also consumes store-driven children.
+
+The layer labels describe runtime ownership, not visual size. Foundations remain
+outside the component layers because they document tokens rather than a public
+React component.
 
 ## Runtime providers
 

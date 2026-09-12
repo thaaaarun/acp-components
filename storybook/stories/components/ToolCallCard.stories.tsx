@@ -22,7 +22,7 @@ const changedFile: ToolCallState = {
 };
 
 const meta = {
-  title: 'Components/Tool Call Card',
+  title: 'Layer 1 - Props & Context/Components/Tool Call Card',
   component: ToolCallCard,
   tags: ['autodocs'],
   parameters: { frame: 'padded' },

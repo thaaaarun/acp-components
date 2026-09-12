@@ -8,7 +8,7 @@ import {
 } from '../../support/fixtures';
 
 const meta = {
-  title: 'Components/Chat View',
+  title: 'Layer 2 - Store Driven/Components/Chat View',
   component: ChatView,
   tags: ['autodocs'],
   parameters: {

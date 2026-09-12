@@ -9,7 +9,7 @@ function ComposerExample(props: ChatComposerProps) {
 }
 
 const meta = {
-  title: 'Components/Chat Composer',
+  title: 'Layer 1 - Props & Context/Components/Chat Composer',
   component: ChatComposer,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

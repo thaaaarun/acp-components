@@ -3,7 +3,7 @@ import { ConnectionStatus } from '@acp-components/react';
 import { connectedAgent } from '../../support/fixtures';
 
 const meta = {
-  title: 'Components/Connection Status',
+  title: 'Layer 2 - Store Driven/Components/Connection Status',
   component: ConnectionStatus,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

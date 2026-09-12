@@ -23,7 +23,7 @@ function DropdownExample() {
 }
 
 const meta = {
-  title: 'Components/Dropdown',
+  title: 'Layer 1 - Props & Context/Components/Dropdown',
   component: Dropdown,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

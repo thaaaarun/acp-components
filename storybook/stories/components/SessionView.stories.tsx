@@ -14,7 +14,7 @@ const diffTab = {
 };
 
 const meta = {
-  title: 'Components/Session View',
+  title: 'Layer 2 - Store Driven/Components/Session View',
   component: SessionView,
   tags: ['autodocs'],
   parameters: {

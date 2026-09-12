@@ -24,7 +24,7 @@ export function Session({ id }: { id: string }) {
 `;
 
 const meta = {
-  title: 'Components/Markdown',
+  title: 'Layer 1 - Props & Context/Components/Markdown',
   component: Markdown,
   tags: ['autodocs'],
   parameters: { frame: 'padded' },

@@ -30,22 +30,23 @@ const authAgent = {
 };
 
 const meta = {
-  title: 'Components/Login Dialog',
+  title: 'Layer 2 - Store Driven/Components/Login Dialog',
   component: LoginDialog,
   tags: ['autodocs'],
-  parameters: {
-    frame: 'fullscreen',
-    acp: {
-      agents: [authAgent],
-      pendingAuthAgentId: STORY_AGENT_ID,
-    },
-  },
+  parameters: { frame: 'fullscreen' },
 } satisfies Meta<typeof LoginDialog>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const AuthenticationRequired: Story = {};
+export const AuthenticationRequired: Story = {
+  parameters: {
+    acp: {
+      agents: [authAgent],
+      pendingAuthAgentId: STORY_AGENT_ID,
+    },
+  },
+};
 export const HiddenWithoutRequest: Story = {
   parameters: { acp: { agents: [authAgent] } },
 };

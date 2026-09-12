@@ -3,10 +3,10 @@ import { UsageBar } from '@acp-components/react';
 import { STORY_SESSION_ID, conversationSeed } from '../../support/fixtures';
 
 const meta = {
-  title: 'Components/Usage Bar',
+  title: 'Layer 2 - Store Driven/Components/Usage Bar',
   component: UsageBar,
   tags: ['autodocs'],
-  parameters: { frame: 'centered', acp: conversationSeed },
+  parameters: { frame: 'centered' },
   decorators: [(Story) => <div className="acp-story-status-bar"><Story /></div>],
   args: { sessionId: STORY_SESSION_ID },
 } satisfies Meta<typeof UsageBar>;
@@ -14,7 +14,9 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Normal: Story = {};
+export const Normal: Story = {
+  parameters: { acp: conversationSeed },
+};
 export const NearLimit: Story = {
   parameters: {
     acp: {

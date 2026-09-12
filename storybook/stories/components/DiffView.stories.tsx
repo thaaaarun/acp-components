@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { DiffView } from '@acp-components/react';
 
 const meta = {
-  title: 'Components/Diff View',
+  title: 'Layer 1 - Props & Context/Components/Diff View',
   component: DiffView,
   tags: ['autodocs'],
   parameters: { frame: 'padded' },

@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { SettingsMenu } from '@acp-components/react';
 
 const meta = {
-  title: 'Components/Settings Menu',
+  title: 'Layer 1 - Props & Context/Components/Settings Menu',
   component: SettingsMenu,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

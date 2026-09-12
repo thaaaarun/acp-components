@@ -7,7 +7,7 @@ import {
 import { conversationSeed } from '../../support/fixtures';
 
 const meta = {
-  title: 'Pages/Settings View',
+  title: 'Layer 3 - Pages & Patterns/Pages/Settings View',
   component: SettingsView,
   tags: ['autodocs'],
   parameters: {

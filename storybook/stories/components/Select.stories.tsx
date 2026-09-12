@@ -16,7 +16,7 @@ function ControlledSelect(props: SelectProps) {
 }
 
 const meta = {
-  title: 'Components/Select',
+  title: 'Layer 1 - Props & Context/Components/Select',
   component: Select,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

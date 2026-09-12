@@ -3,7 +3,7 @@ import { PlatformProvider } from '@acp-components/react';
 import { createMockPlatform } from '../../support/createMockPlatform';
 
 const meta = {
-  title: 'Providers/Platform Provider',
+  title: 'Layer 2 - Store Driven/Providers/Platform Provider',
   component: PlatformProvider,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

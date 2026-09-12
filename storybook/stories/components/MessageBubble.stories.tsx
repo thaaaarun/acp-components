@@ -5,7 +5,7 @@ import { conversationMessages } from '../../support/fixtures';
 const agentMessages = conversationMessages.filter((message) => message.role === 'agent');
 
 const meta = {
-  title: 'Components/Message Bubble',
+  title: 'Layer 2 - Store Driven/Components/Message Bubble',
   component: MessageBubble,
   tags: ['autodocs'],
   parameters: { frame: 'padded' },

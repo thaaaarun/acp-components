@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { ResizeHandle } from '@acp-components/react';
 
 const meta = {
-  title: 'Components/Resize Handle',
+  title: 'Layer 1 - Props & Context/Components/Resize Handle',
   component: ResizeHandle,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

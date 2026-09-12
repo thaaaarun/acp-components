@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { HotkeysProvider } from '@acp-components/react';
 
 const meta = {
-  title: 'Providers/Hotkeys Provider',
+  title: 'Layer 1 - Props & Context/Providers/Hotkeys Provider',
   component: HotkeysProvider,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

@@ -3,7 +3,7 @@ import { PlanView } from '@acp-components/react';
 import { activePlan } from '../../support/fixtures';
 
 const meta = {
-  title: 'Components/Plan View',
+  title: 'Layer 1 - Props & Context/Components/Plan View',
   component: PlanView,
   tags: ['autodocs'],
   parameters: { frame: 'padded' },

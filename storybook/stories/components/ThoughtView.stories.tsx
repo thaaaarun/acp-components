@@ -15,7 +15,7 @@ function ControlledThought(props: ThoughtViewProps) {
 }
 
 const meta = {
-  title: 'Components/Thought View',
+  title: 'Layer 1 - Props & Context/Components/Thought View',
   component: ThoughtView,
   tags: ['autodocs'],
   parameters: { frame: 'padded' },

@@ -15,10 +15,10 @@ function ControlledSidebar(props: SidebarProps) {
 }
 
 const meta = {
-  title: 'Components/Sidebar',
+  title: 'Layer 2 - Store Driven/Components/Sidebar',
   component: Sidebar,
   tags: ['autodocs'],
-  parameters: { frame: 'padded', acp: conversationSeed },
+  parameters: { frame: 'padded' },
   decorators: [(Story) => <div className="acp-story-sidebar-panel acp-story-sidebar-panel--tall"><Story /></div>],
   render: (args) => <ControlledSidebar {...args} />,
   args: {
@@ -32,8 +32,13 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Navigation: Story = {};
-export const SessionListOnly: Story = { args: { navItems: [] } };
+export const Navigation: Story = {
+  parameters: { acp: conversationSeed },
+};
+export const SessionListOnly: Story = {
+  args: { navItems: [] },
+  parameters: { acp: conversationSeed },
+};
 export const Empty: Story = {
   args: { navItems: [] },
   parameters: { acp: {} },

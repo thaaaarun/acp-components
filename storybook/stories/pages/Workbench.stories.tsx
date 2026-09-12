@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { Workbench } from '@acp-components/react';
 
 const meta = {
-  title: 'Pages/Workbench',
+  title: 'Layer 3 - Pages & Patterns/Pages/Workbench',
   component: Workbench,
   tags: ['autodocs'],
   parameters: { frame: 'fullscreen' },

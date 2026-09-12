@@ -5,7 +5,7 @@ import { STORY_CWD } from '../../support/fixtures';
 const sourcePath = `${STORY_CWD}/packages/react/src/index.ts`;
 
 const meta = {
-  title: 'Components/File Viewer',
+  title: 'Layer 2 - Store Driven/Components/File Viewer',
   component: FileViewer,
   tags: ['autodocs'],
   parameters: {

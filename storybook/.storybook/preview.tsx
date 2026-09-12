@@ -73,7 +73,13 @@ const preview: Preview = {
     },
     options: {
       storySort: {
-        order: ['Introduction', 'Foundations', 'Components', 'Providers', 'Patterns', 'Pages'],
+        order: [
+          'Introduction',
+          'Foundations',
+          'Layer 1 - Props & Context',
+          'Layer 2 - Store Driven',
+          'Layer 3 - Pages & Patterns',
+        ],
       },
     },
     viewport: {

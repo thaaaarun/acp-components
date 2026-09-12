@@ -3,7 +3,7 @@ import { WorkbenchShell } from '@acp-components/react';
 import { conversationSeed } from '../../support/fixtures';
 
 const meta = {
-  title: 'Pages/Workbench Shell',
+  title: 'Layer 3 - Pages & Patterns/Pages/Workbench Shell',
   component: WorkbenchShell,
   tags: ['autodocs'],
   parameters: {

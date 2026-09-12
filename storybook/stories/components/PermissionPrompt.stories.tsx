@@ -7,11 +7,18 @@ import {
 } from '../../support/fixtures';
 
 const meta = {
-  title: 'Components/Permission Prompt',
+  title: 'Layer 2 - Store Driven/Components/Permission Prompt',
   component: PermissionPrompt,
   tags: ['autodocs'],
+  parameters: { frame: 'centered' },
+  args: { sessionId: STORY_SESSION_ID },
+} satisfies Meta<typeof PermissionPrompt>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const ApprovalRequired: Story = {
   parameters: {
-    frame: 'centered',
     acp: {
       ...conversationSeed,
       sessions: {
@@ -19,13 +26,7 @@ const meta = {
       },
     },
   },
-  args: { sessionId: STORY_SESSION_ID },
-} satisfies Meta<typeof PermissionPrompt>;
-
-export default meta;
-type Story = StoryObj<typeof meta>;
-
-export const ApprovalRequired: Story = {};
+};
 export const NoPendingRequest: Story = {
   parameters: { acp: conversationSeed },
 };

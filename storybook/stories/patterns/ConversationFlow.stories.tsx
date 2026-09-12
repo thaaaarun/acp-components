@@ -14,7 +14,7 @@ function ConversationFlow() {
 }
 
 const meta = {
-  title: 'Patterns/Conversation Flow',
+  title: 'Layer 3 - Pages & Patterns/Patterns/Conversation Flow',
   component: ConversationFlow,
   parameters: { frame: 'fullscreen', acp: conversationSeed },
 } satisfies Meta<typeof ConversationFlow>;

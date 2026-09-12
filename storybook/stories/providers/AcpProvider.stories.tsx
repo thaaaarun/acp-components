@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { AcpProvider } from '@acp-components/react';
 
 const meta = {
-  title: 'Providers/Acp Provider',
+  title: 'Layer 2 - Store Driven/Providers/Acp Provider',
   component: AcpProvider,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },

@@ -3,7 +3,7 @@ import { SessionConfigPanel } from '@acp-components/react';
 import { STORY_SESSION_ID, configOptions, conversationSeed } from '../../support/fixtures';
 
 const meta = {
-  title: 'Components/Session Config Panel',
+  title: 'Layer 2 - Store Driven/Components/Session Config Panel',
   component: SessionConfigPanel,
   tags: ['autodocs'],
   parameters: {

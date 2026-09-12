@@ -8,11 +8,17 @@ import {
 } from '../../support/fixtures';
 
 const meta = {
-  title: 'Pages/New Session View',
+  title: 'Layer 3 - Pages & Patterns/Pages/New Session View',
   component: NewSessionView,
   tags: ['autodocs'],
+  parameters: { frame: 'fullscreen' },
+} satisfies Meta<typeof NewSessionView>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Ready: Story = {
   parameters: {
-    frame: 'fullscreen',
     acp: {
       ...conversationSeed,
       agents: [{ ...connectedAgent, configOptions }],
@@ -21,12 +27,7 @@ const meta = {
       sessions: {},
     },
   },
-} satisfies Meta<typeof NewSessionView>;
-
-export default meta;
-type Story = StoryObj<typeof meta>;
-
-export const Ready: Story = {};
+};
 
 export const NoAgents: Story = {
   parameters: {

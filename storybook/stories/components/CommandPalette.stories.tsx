@@ -3,7 +3,7 @@ import { CommandPalette } from '@acp-components/react';
 import { availableCommands } from '../../support/fixtures';
 
 const meta = {
-  title: 'Components/Command Palette',
+  title: 'Layer 1 - Props & Context/Components/Command Palette',
   component: CommandPalette,
   tags: ['autodocs'],
   parameters: { frame: 'centered' },
