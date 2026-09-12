@@ -88,7 +88,7 @@ export { useAcpStore } from './hooks/useAcpStore';
 export { useSessionStore } from './hooks/useSessionStore';
 export { useSessions } from './hooks/useSessions';
 export { useWorkspaces } from './hooks/useWorkspaces';
-export { useSessionMessages, useSessionIsStreaming, useSessionPlan, useSessionAvailableCommands, useSessionPendingToolCalls, useSessionPendingPermissions, useSessionConfigOptions, useSessionUsage, useSessionQueuedMessages } from './hooks/useSession';
+export { useSessionMessages, useSessionIsStreaming, useSessionPlan, useSessionAvailableCommands, useSessionPendingToolCalls, useSessionPendingPermissions, useSessionConfigOptions, useSessionUsage, useSessionQueuedMessages, useSessionTerminals } from './hooks/useSession';
 export { usePrompt } from './hooks/usePrompt';
 export { useComposerStorage } from './hooks/useComposerStorage';
 export { useToolCalls } from './hooks/useToolCalls';
@@ -135,6 +135,7 @@ export type {
   ToolCallState,
   TransportConfig,
   PermissionRequest,
+  AgentTerminalState,
   ConnectionStatus as ConnectionStatusType,
   MessagePart,
   AgentConfig,

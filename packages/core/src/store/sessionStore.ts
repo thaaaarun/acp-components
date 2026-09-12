@@ -1,9 +1,9 @@
 import { createStore } from 'zustand/vanilla';
-import type { Message, ToolCallState, PermissionRequest, QueuedMessage } from '../types';
-import type { SessionId, ContentBlock, StopReason, PlanEntry, UsageUpdate, SessionConfigOption, AvailableCommand } from '@agentclientprotocol/sdk';
+import type { AgentTerminalState, Message, ToolCallState, PermissionRequest, QueuedMessage } from '../types';
+import type { SessionId, ContentBlock, StopReason, PlanEntry, UsageUpdate, SessionConfigOption, AvailableCommand, ToolCallContent } from '@agentclientprotocol/sdk';
 import { generateId } from '../utils/id';
 
-interface SessionData {
+export interface SessionData {
   messages: Message[];
   isStreaming: boolean;
   pendingToolCalls: Map<string, ToolCallState>;
@@ -13,9 +13,10 @@ interface SessionData {
   configOptions: SessionConfigOption[];
   availableCommands: AvailableCommand[];
   queuedMessages: QueuedMessage[];
+  terminals: Map<string, AgentTerminalState>;
 }
 
-interface SessionStoreState {
+export interface SessionStoreState {
   sessions: Map<SessionId, SessionData>;
 
   ensureSession: (id: SessionId) => void;
@@ -26,10 +27,13 @@ interface SessionStoreState {
   updateMessage: (sessionId: SessionId, id: string, update: Partial<Message>) => void;
   appendContent: (sessionId: SessionId, messageId: string, role: Message['role'], block: ContentBlock) => void;
   appendThought: (sessionId: SessionId, messageId: string, role: Message['role'], block: ContentBlock) => void;
+  replaceContent: (sessionId: SessionId, messageId: string, role: Message['role'], content: ContentBlock[] | null | undefined) => void;
+  replaceThought: (sessionId: SessionId, messageId: string, content: ContentBlock[] | null | undefined) => void;
   setIsStreaming: (sessionId: SessionId, v: boolean) => void;
-  setStopReason: (sessionId: SessionId, r: StopReason) => void;
+  setStopReason: (sessionId: SessionId, r: StopReason, messageId?: string) => void;
   upsertToolCall: (sessionId: SessionId, tc: ToolCallState) => void;
   updateToolCall: (sessionId: SessionId, id: string, update: Partial<ToolCallState>) => void;
+  appendToolCallContent: (sessionId: SessionId, id: string, block: ToolCallContent) => void;
   addPermissionRequest: (sessionId: SessionId, req: PermissionRequest) => void;
   removePermissionRequest: (sessionId: SessionId, requestId?: string) => void;
   /**
@@ -41,6 +45,8 @@ interface SessionStoreState {
    */
   rejectAllPermissions: (sessionId: SessionId) => void;
   setPlan: (sessionId: SessionId, entries: PlanEntry[]) => void;
+  upsertPlan: (sessionId: SessionId, planId: string, entries: PlanEntry[]) => void;
+  removePlan: (sessionId: SessionId, planId: string) => void;
   setUsage: (sessionId: SessionId, usage: UsageUpdate) => void;
   setConfigOptions: (sessionId: SessionId, configOptions: SessionConfigOption[]) => void;
   setAvailableCommands: (sessionId: SessionId, commands: AvailableCommand[]) => void;
@@ -50,6 +56,8 @@ interface SessionStoreState {
   dequeueMessage: (sessionId: SessionId, queuedId: string) => void;
   /** Remove and return the head of the queue (FIFO). Returns undefined when empty. */
   shiftQueuedMessage: (sessionId: SessionId) => QueuedMessage | undefined;
+  updateTerminal: (sessionId: SessionId, update: AgentTerminalState) => void;
+  appendTerminalOutput: (sessionId: SessionId, terminalId: string, data: string) => void;
 }
 
 function createSessionData(): SessionData {
@@ -63,6 +71,7 @@ function createSessionData(): SessionData {
     configOptions: [],
     availableCommands: [],
     queuedMessages: [],
+    terminals: new Map(),
   };
 }
 
@@ -84,6 +93,31 @@ function rejectPendingPermissions(reqs: PermissionRequest[] | undefined): Permis
     }
   }
   return [];
+}
+
+function decodeBase64(value: string | null | undefined): Uint8Array {
+  if (!value) return new Uint8Array();
+  try {
+    if (typeof globalThis.atob === 'function') {
+      const decoded = globalThis.atob(value);
+      return Uint8Array.from(decoded, (char) => char.charCodeAt(0));
+    }
+    const nodeBuffer = (globalThis as typeof globalThis & {
+      Buffer?: { from(value: string, encoding: string): Uint8Array };
+    }).Buffer;
+    return nodeBuffer ? new Uint8Array(nodeBuffer.from(value, 'base64')) : new Uint8Array();
+  } catch {
+    // Invalid agent output must not break processing of later session updates.
+    return new Uint8Array();
+  }
+}
+
+function concatBytes(previous: Uint8Array | undefined, next: Uint8Array): Uint8Array {
+  if (!previous?.length) return next;
+  const result = new Uint8Array(previous.length + next.length);
+  result.set(previous);
+  result.set(next, previous.length);
+  return result;
 }
 
 // --- Message update helpers (avoid O(n) message scans during streaming) ---
@@ -271,6 +305,60 @@ export const sessionStore = createStore<SessionStoreState>((set) => ({
       return { sessions: next };
     }),
 
+  replaceContent: (sessionId, messageId, role, content) =>
+    set((s) => {
+      const data = s.sessions.get(sessionId);
+      if (!data) return s;
+      const existingIndex = data.messages.findIndex((m) => m.id === messageId);
+      const messages = [...data.messages];
+      if (content === undefined && existingIndex >= 0) return s;
+      if (existingIndex < 0) {
+        messages.push({
+          id: messageId,
+          role,
+          parts: content == null ? [] : [{ type: 'content', content }],
+          timestamp: Date.now(),
+        });
+      } else {
+        const message = data.messages[existingIndex];
+        const contentPart: Extract<Message['parts'][number], { type: 'content' }> | null = content == null ? null : { type: 'content', content };
+        const parts: Message['parts'] = message.parts.filter((part) => part.type !== 'content');
+        const firstContentIndex = message.parts.findIndex((part) => part.type === 'content');
+        if (contentPart) parts.splice(Math.min(firstContentIndex < 0 ? parts.length : firstContentIndex, parts.length), 0, contentPart);
+        messages[existingIndex] = { ...message, parts };
+      }
+      const next = new Map(s.sessions);
+      next.set(sessionId, { ...data, messages });
+      return { sessions: next };
+    }),
+
+  replaceThought: (sessionId, messageId, content) =>
+    set((s) => {
+      const data = s.sessions.get(sessionId);
+      if (!data) return s;
+      const idx = data.messages.findIndex((m) => m.id === messageId);
+      if (content === undefined && idx >= 0) return s;
+      const messages = [...data.messages];
+      if (idx < 0) {
+        messages.push({
+          id: messageId,
+          role: 'agent',
+          parts: content == null ? [] : [{ type: 'thought', thought: content }],
+          timestamp: Date.now(),
+        });
+      } else {
+        const message = messages[idx];
+        const thoughtPart: Extract<Message['parts'][number], { type: 'thought' }> | null = content == null ? null : { type: 'thought', thought: content };
+        const parts: Message['parts'] = message.parts.filter((part) => part.type !== 'thought');
+        const firstThoughtIndex = message.parts.findIndex((part) => part.type === 'thought');
+        if (thoughtPart) parts.splice(Math.min(firstThoughtIndex < 0 ? parts.length : firstThoughtIndex, parts.length), 0, thoughtPart);
+        messages[idx] = { ...message, parts };
+      }
+      const next = new Map(s.sessions);
+      next.set(sessionId, { ...data, messages });
+      return { sessions: next };
+    }),
+
   setIsStreaming: (sessionId, v) =>
     set((s) => {
       const data = s.sessions.get(sessionId);
@@ -280,14 +368,17 @@ export const sessionStore = createStore<SessionStoreState>((set) => ({
       return { sessions: next };
     }),
 
-  setStopReason: (sessionId, r) =>
+  setStopReason: (sessionId, r, messageId) =>
     set((s) => {
       const data = s.sessions.get(sessionId);
       if (!data || data.messages.length === 0) return s;
       const next = new Map(s.sessions);
       const messages = [...data.messages];
-      const lastIdx = messages.length - 1;
-      messages[lastIdx] = { ...messages[lastIdx], stopReason: r };
+      const messageIndex = messageId
+        ? messages.findIndex((message) => message.id === messageId)
+        : messages.length - 1;
+      if (messageIndex < 0) return s;
+      messages[messageIndex] = { ...messages[messageIndex], stopReason: r };
       next.set(sessionId, { ...data, messages });
       return { sessions: next };
     }),
@@ -386,6 +477,26 @@ export const sessionStore = createStore<SessionStoreState>((set) => ({
       return { sessions: next };
     }),
 
+  appendToolCallContent: (sessionId, id, block) =>
+    set((s) => {
+      const data = s.sessions.get(sessionId);
+      if (!data) return s;
+      const existing = data.pendingToolCalls.get(id);
+      if (!existing) return s;
+      const updated = { ...existing, content: [...(existing.content ?? []), block], expanded: existing.expanded };
+      const pendingToolCalls = new Map(data.pendingToolCalls);
+      pendingToolCalls.set(id, updated);
+      const messages = data.messages.map((m) => ({
+        ...m,
+        parts: m.parts.map((p) => p.type === 'tool_calls'
+          ? { ...p, toolCalls: p.toolCalls.map((t) => t.toolCallId === id ? updated : t) }
+          : p),
+      }));
+      const next = new Map(s.sessions);
+      next.set(sessionId, { ...data, pendingToolCalls, messages });
+      return { sessions: next };
+    }),
+
   addPermissionRequest: (sessionId, req) =>
     set((s) => {
       const data = s.sessions.get(sessionId);
@@ -438,6 +549,47 @@ export const sessionStore = createStore<SessionStoreState>((set) => ({
       ];
       const next = new Map(s.sessions);
       next.set(sessionId, { ...data, plan: entries, messages });
+      return { sessions: next };
+    }),
+
+  upsertPlan: (sessionId, planId, entries) =>
+    set((s) => {
+      const data = s.sessions.get(sessionId);
+      if (!data) return s;
+      const planMessageIndex = data.messages.findIndex((message) =>
+        message.parts.some((part) => part.type === 'plan' && part.planId === planId));
+      const planPart = { type: 'plan' as const, plan: entries, planId };
+      const messages = [...data.messages];
+      if (planMessageIndex >= 0) {
+        const message = messages[planMessageIndex];
+        messages[planMessageIndex] = {
+          ...message,
+          parts: message.parts.map((part) =>
+            part.type === 'plan' && part.planId === planId ? planPart : part),
+        };
+      } else {
+        messages.push({ id: generateId('plan'), role: 'agent', parts: [planPart], timestamp: Date.now() });
+      }
+      const next = new Map(s.sessions);
+      next.set(sessionId, { ...data, plan: entries, messages });
+      return { sessions: next };
+    }),
+
+  removePlan: (sessionId, planId) =>
+    set((s) => {
+      const data = s.sessions.get(sessionId);
+      if (!data) return s;
+      const messages = data.messages
+        .map((message) => ({
+          ...message,
+          parts: message.parts.filter((part) => !(part.type === 'plan' && part.planId === planId)),
+        }))
+        .filter((message) => message.parts.length > 0);
+      const remainingPlans = messages.flatMap((message) => message.parts
+        .filter((part): part is Extract<Message['parts'][number], { type: 'plan' }> => part.type === 'plan')
+        .map((part) => part.plan));
+      const next = new Map(s.sessions);
+      next.set(sessionId, { ...data, messages, plan: remainingPlans.at(-1) ?? [] });
       return { sessions: next };
     }),
 
@@ -555,4 +707,39 @@ export const sessionStore = createStore<SessionStoreState>((set) => ({
     });
     return head;
   },
+
+  updateTerminal: (sessionId, update) =>
+    set((s) => {
+      const data = s.sessions.get(sessionId);
+      if (!data) return s;
+      const terminals = new Map(data.terminals);
+      const previous = terminals.get(update.terminalId);
+      const hasSnapshot = Object.prototype.hasOwnProperty.call(update, 'outputBase64');
+      terminals.set(update.terminalId, {
+        ...previous,
+        ...update,
+        outputChunks: hasSnapshot ? [] : previous?.outputChunks ?? [],
+        outputBytes: hasSnapshot ? decodeBase64(update.outputBase64) : previous?.outputBytes,
+        outputMeta: hasSnapshot ? update.outputMeta : previous?.outputMeta,
+      });
+      const next = new Map(s.sessions);
+      next.set(sessionId, { ...data, terminals });
+      return { sessions: next };
+    }),
+
+  appendTerminalOutput: (sessionId, terminalId, data) =>
+    set((s) => {
+      const session = s.sessions.get(sessionId);
+      if (!session) return s;
+      const terminals = new Map(session.terminals);
+      const previous = terminals.get(terminalId) ?? { terminalId, outputChunks: [] };
+      terminals.set(terminalId, {
+        ...previous,
+        outputChunks: [...(previous.outputChunks ?? []), data],
+        outputBytes: concatBytes(previous.outputBytes, decodeBase64(data)),
+      });
+      const next = new Map(s.sessions);
+      next.set(sessionId, { ...session, terminals });
+      return { sessions: next };
+    }),
 }));

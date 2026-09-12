@@ -27,9 +27,9 @@ export function PermissionPrompt({ sessionId }: PermissionPromptProps) {
   return (
     <div className={styles.acpPermissionPrompt} role="dialog" aria-label={t('permission.ariaLabel')}>
       <div className={styles.acpPermissionPromptCard} ref={cardRef} tabIndex={-1}>
-        <h3 className={styles.acpPermissionPromptTitle}>{t('permission.title')}</h3>
+        <h3 className={styles.acpPermissionPromptTitle}>{currentRequest.title || t('permission.title')}</h3>
         <p className={styles.acpPermissionPromptDesc}>
-          {t('permission.description')}
+          {currentRequest.description || t('permission.description')}
         </p>
         <div className={styles.acpPermissionPromptTool}>
           <div className={styles.acpPermissionPromptToolName}>{currentRequest.toolCall.title}</div>

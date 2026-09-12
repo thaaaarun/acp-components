@@ -33,7 +33,7 @@ export type MessagePart =
   | { type: 'content'; content: ContentBlock[] }
   | { type: 'thought'; thought: ContentBlock[]; expanded?: boolean }
   | { type: 'tool_calls'; toolCalls: ToolCallState[] }
-  | { type: 'plan'; plan: PlanEntry[] };
+  | { type: 'plan'; plan: PlanEntry[]; planId?: string };
 
 export interface Message {
   id: string;
@@ -102,6 +102,7 @@ export interface AgentConnection {
   authMethods: AuthMethod[];
   /** Protocol version selected during initialization, when connected. */
   protocolVersion?: AcpProtocolVersion;
+  hasSession?: boolean;
   /**
    * Agent-level cache of the most recently observed `configOptions`
    * (from NewSessionResponse / LoadSessionResponse / set_config_option).
@@ -126,6 +127,15 @@ export interface AuthMethodEnvVar {
   }>;
 }
 
+/** A forward-compatible v2 auth method that the legacy SDK type does not know. */
+export interface AuthMethodExtension {
+  type: string;
+  id: string;
+  name: string;
+  description?: string;
+  [key: string]: unknown;
+}
+
 export interface WorkspaceState {
   cwd: string;
   label?: string;
@@ -137,9 +147,33 @@ export interface PermissionRequest {
   id: string;
   sessionId: SessionId;
   toolCall: ToolCallUpdate;
+  title?: string;
+  description?: string;
+  subject?: {
+    type: string;
+    command?: string;
+    cwd?: string;
+    toolCallId?: string | null;
+    terminalId?: string | null;
+  };
   options: Array<PermissionOption>;
   resolve: (optionId: string) => void;
   reject: () => void;
+}
+
+/** Agent-owned display terminal state from ACP v2. */
+export interface AgentTerminalState {
+  terminalId: string;
+  command?: string | null;
+  cwd?: string | null;
+  outputBase64?: string | null;
+  /** Metadata attached to the current replacement snapshot, when supplied. */
+  outputMeta?: Record<string, unknown> | null;
+  /** Decoded bytes for hosts that render a terminal transcript or emulator. */
+  outputBytes?: Uint8Array;
+  exitStatus?: Record<string, unknown> | null;
+  outputChunks?: string[];
+  _meta?: Record<string, unknown> | null;
 }
 
 export interface FileTreeNode {
@@ -237,4 +271,4 @@ export interface UpdaterState {
 }
 
 export type { ContentBlock, SessionId, SessionInfo, SessionUpdate, StopReason, ToolCall, ToolCallUpdate, ToolCallContent, Implementation, AgentCapabilities, PermissionOption, ClientCapabilities, PlanEntry, AvailableCommand, PromptResponse, UsageUpdate, SessionConfigOption, PromptCapabilities, SessionConfigSelectOptions, SessionConfigSelectGroup, ToolCallLocation, ToolKind };
-export type AuthMethod = SdkAuthMethod | AuthMethodEnvVar;
+export type AuthMethod = SdkAuthMethod | AuthMethodEnvVar | AuthMethodExtension;

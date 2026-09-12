@@ -1,7 +1,7 @@
 import { useStore } from 'zustand/react';
 import { useShallow } from 'zustand/react/shallow';
 import { sessionStore } from '@acp-components/core';
-import type { Message, ToolCallState, PermissionRequest, QueuedMessage } from '@acp-components/core';
+import type { AgentTerminalState, Message, ToolCallState, PermissionRequest, QueuedMessage } from '@acp-components/core';
 import type { SessionId, PlanEntry, UsageUpdate, SessionConfigOption, AvailableCommand } from '@acp-components/core';
 
 // Module-level stable empty defaults so Object.is comparisons work when session is absent
@@ -12,6 +12,7 @@ const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_CONFIG_OPTIONS: SessionConfigOption[] = [];
 const EMPTY_COMMANDS: AvailableCommand[] = [];
 const EMPTY_QUEUED: QueuedMessage[] = [];
+const EMPTY_TERMINALS: AgentTerminalState[] = [];
 
 // ---------------------------------------------------------------------------
 // Fine-grained hooks — each subscribes to a SINGLE slice of session state.
@@ -90,4 +91,15 @@ export function useSessionQueuedMessages(sessionId: SessionId | null): QueuedMes
     if (!sessionId) return EMPTY_QUEUED;
     return s.sessions.get(sessionId)?.queuedMessages ?? EMPTY_QUEUED;
   });
+}
+
+export function useSessionTerminals(sessionId: SessionId | null): AgentTerminalState[] {
+  return useStore(
+    sessionStore,
+    useShallow((s) => {
+      if (!sessionId) return EMPTY_TERMINALS;
+      const data = s.sessions.get(sessionId);
+      return data ? Array.from(data.terminals.values()) : EMPTY_TERMINALS;
+    }),
+  );
 }

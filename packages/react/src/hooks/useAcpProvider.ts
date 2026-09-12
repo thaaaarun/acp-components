@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useStore } from 'zustand/react';
 import { useShallow } from 'zustand/shallow';
 import { createAcpProvider, acpStore } from '@acp-components/core';
-import type { MultiAgentProviderOptions, MultiAgentProviderInstance, AgentConfig, StdioTransportFactory } from '@acp-components/core';
+import type { MultiAgentProviderOptions, MultiAgentProviderInstance, AgentConfig, StdioTransportFactory, TerminalAuthFactory } from '@acp-components/core';
 import { usePlatform } from '../context/PlatformContext';
 
 export function useAcpProvider(options: MultiAgentProviderOptions) {
@@ -16,9 +16,11 @@ export function useAcpProvider(options: MultiAgentProviderOptions) {
   const { process: processSlice } = usePlatform();
   const stdioFactory: StdioTransportFactory | null =
     processSlice?.createStdioTransport ?? null;
+  const terminalAuthFactory: TerminalAuthFactory | null =
+    processSlice?.runTerminalAuth ?? null;
 
   if (!providerRef.current) {
-    providerRef.current = createAcpProvider(options, stdioFactory);
+    providerRef.current = createAcpProvider(options, stdioFactory, terminalAuthFactory);
   }
 
   useEffect(() => {

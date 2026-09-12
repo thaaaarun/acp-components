@@ -44,14 +44,20 @@ export class V1Adapter implements ProtocolAdapter {
   readonly version = 1 as const;
   private readonly connection: ClientConnection;
   private readonly context: ClientContext;
+  private logoutSupported = false;
 
   constructor(options: V1AdapterOptions) {
     const app = client({ name: 'acp-components-client' })
       .onNotification(methods.client.session.update, (ctx) => {
-        options.onSessionUpdate(ctx.params);
+        options.onSessionUpdate({ ...ctx.params, protocolVersion: 1 });
       })
       .onRequest(methods.client.session.requestPermission, (ctx) => {
-        return options.onPermission(ctx.params);
+        return options.onPermission({
+          sessionId: ctx.params.sessionId,
+          title: ctx.params.toolCall?.title ?? 'Permission required',
+          toolCall: ctx.params.toolCall,
+          options: ctx.params.options,
+        });
       });
     this.connection = app.connect(options.stream);
     this.context = this.connection.agent;
@@ -71,6 +77,7 @@ export class V1Adapter implements ProtocolAdapter {
     if (response.protocolVersion !== 1) {
       throw new Error(`Unsupported ACP protocol version in v1 initialize response: ${String(response.protocolVersion)}`);
     }
+    this.logoutSupported = response.agentCapabilities?.auth?.logout != null;
     return {
       protocolVersion: 1,
       agentInfo: response.agentInfo ?? clientInfo ?? { name: 'unknown', version: 'unknown' },
@@ -104,7 +111,7 @@ export class V1Adapter implements ProtocolAdapter {
     return this.context.request(methods.agent.session.list, params);
   }
 
-  resumeSession(sessionId: string, cwd: string, mcpServers: LoadSessionRequest['mcpServers'] = []): Promise<LoadSessionResponse> {
+  resumeSession(sessionId: string, cwd: string, mcpServers: LoadSessionRequest['mcpServers'] = [], _replayFromStart = false): Promise<LoadSessionResponse> {
     return this.context.request(methods.agent.session.load, { sessionId, cwd, mcpServers });
   }
 
@@ -132,6 +139,13 @@ export class V1Adapter implements ProtocolAdapter {
 
   login(methodId: string): Promise<AuthenticateResponse> {
     return this.authenticate(methodId);
+  }
+
+  logout(): Promise<unknown> {
+    if (!this.logoutSupported) {
+      return Promise.reject(new Error('ACP v1 logout is not advertised by the agent'));
+    }
+    return this.context.request(methods.agent.logout, {});
   }
 
   extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {

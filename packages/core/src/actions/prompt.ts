@@ -8,13 +8,18 @@ export async function sendPrompt(client: AcpClient, sessionId: SessionId, conten
   const store = sessionStore.getState();
   store.ensureSession(sessionId);
 
-  const userMsg: Message = {
-    id: generateId('user'),
-    role: 'user',
-    parts: [{ type: 'content', content: contentBlocks }],
-    timestamp: Date.now(),
-  };
-  store.addMessage(sessionId, userMsg);
+  // v2 agents acknowledge the user message through a `user_message` update
+  // with the canonical agent-owned messageId. In v1 the request has no such
+  // update, so retain the local optimistic message.
+  if (client.protocolVersion !== 2) {
+    const userMsg: Message = {
+      id: generateId('user'),
+      role: 'user',
+      parts: [{ type: 'content', content: contentBlocks }],
+      timestamp: Date.now(),
+    };
+    store.addMessage(sessionId, userMsg);
+  }
 
   store.setIsStreaming(sessionId, true);
 

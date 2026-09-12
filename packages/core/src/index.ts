@@ -1,10 +1,11 @@
 export { AcpClient } from './client/AcpClient';
-export type { SessionUpdateHandler, PermissionHandler, StdioTransportFactory } from './client/AcpClient';
+export type { SessionUpdateHandler, PermissionHandler, StdioTransportFactory, TerminalAuthFactory } from './client/AcpClient';
 export { HttpTransport, WebSocketTransport } from './transport';
 export type { AcpTransport, AcpWireStream, StdioTransportOptions } from './transport';
 export type { AcpProtocolVersion, ProtocolAdapter } from './protocol';
 export { acpStore, findWorkspaceBySession } from './store/acpStore';
 export { sessionStore } from './store/sessionStore';
+export type { SessionData, SessionStoreState } from './store/sessionStore';
 export { fileTreeStore, findNodeByPath } from './store/fileTreeStore';
 export type { WorkspaceFileTreeState } from './store/fileTreeStore';
 export { fileViewerStore } from './store/fileViewerStore';
@@ -19,7 +20,7 @@ export type { Skill, SkillStoreState } from './store/skillStore';
 export { createAcpProvider } from './provider';
 export type { MultiAgentProviderOptions, MultiAgentProviderInstance } from './provider';
 export { isUserVisibleContent } from './utils/content';
-export { createSession, loadSession, selectSession, closeSession, deleteSession, forkSession, refreshSessions, loadMoreSessions, setSessionConfigOption, authenticate, authenticateWithEnv } from './actions/sessions';
+export { createSession, loadSession, selectSession, closeSession, deleteSession, forkSession, refreshSessions, loadMoreSessions, setSessionConfigOption, authenticate, logout, authenticateWithEnv } from './actions/sessions';
 export { sendPrompt, cancelPrompt, queuePrompt, dequeuePrompt } from './actions/prompt';
 export { respondToPermission, denyPermission } from './actions/permission';
 export { callExtMethod, sendExtNotification } from './actions/extensions';
@@ -45,6 +46,8 @@ export type {
   AcpClientConfig,
   TransportConfig,
   PermissionRequest,
+  AgentTerminalState,
+  AuthMethodExtension,
   SessionMeta,
   AgentConfig,
   AgentConnection,

@@ -1,12 +1,13 @@
 import { AcpClient } from './client/AcpClient';
-import type { StdioTransportFactory } from './client/AcpClient';
+import type { StdioTransportFactory, TerminalAuthFactory } from './client/AcpClient';
 import { acpStore } from './store/acpStore';
 import { sessionStore } from './store/sessionStore';
 import { skillStore } from './store/skillStore';
 import type { ToolCallState } from './types';
 import type { AgentConfig } from './types';
-import type { RequestPermissionResponse, ClientCapabilities, ContentBlock } from '@agentclientprotocol/sdk';
+import type { RequestPermissionResponse, ClientCapabilities, ContentBlock, ToolCallContent } from '@agentclientprotocol/sdk';
 import type { PermissionRequest } from './types';
+import type { ProtocolSessionNotification } from './protocol';
 
 function generateMsgId(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -30,6 +31,44 @@ const BATCH_WINDOW_MS = 16; // ~1 frame at 60 fps — imperceptible delay, align
 /** Check whether a ContentBlock is a plain text block (suitable for batching). */
 function isTextBlock(block: ContentBlock): block is ContentBlock & { type: 'text'; text: string } {
   return block.type === 'text' && !('annotations' in block && block.annotations != null);
+}
+
+function normalizeV2ConfigOptions(value: unknown): import('@agentclientprotocol/sdk').SessionConfigOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((option) => {
+    if (!option || typeof option !== 'object') return option;
+    const source = option as Record<string, unknown>;
+    const normalized: Record<string, unknown> = { ...source };
+    if ('configId' in source) {
+      normalized.id = source.configId;
+      delete normalized.configId;
+    }
+    if (Array.isArray(source.options)) {
+      normalized.options = source.options.map((entry) => {
+        if (!entry || typeof entry !== 'object') return entry;
+        const group = entry as Record<string, unknown>;
+        if (!('groupId' in group)) return group;
+        const next: Record<string, unknown> = { ...group, group: group['groupId'] };
+        delete next.groupId;
+        return next;
+      });
+    }
+    return normalized as import('@agentclientprotocol/sdk').SessionConfigOption;
+  });
+}
+
+function normalizeV2ToolCallPatch(raw: Record<string, unknown>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  if ('name' in raw) patch.name = raw.name;
+  if ('title' in raw) patch.title = raw.title === null ? '' : raw.title;
+  if ('kind' in raw) patch.kind = raw.kind === null ? 'other' : raw.kind;
+  if ('status' in raw) patch.status = raw.status === null ? 'pending' : raw.status;
+  if ('rawInput' in raw) patch.rawInput = raw.rawInput;
+  if ('rawOutput' in raw) patch.rawOutput = raw.rawOutput;
+  if ('locations' in raw) patch.locations = raw.locations === null ? [] : raw.locations;
+  if ('content' in raw) patch.content = raw.content === null ? [] : raw.content;
+  if ('_meta' in raw) patch._meta = raw._meta;
+  return patch;
 }
 
 export interface MultiAgentProviderOptions {
@@ -181,44 +220,168 @@ function setupSessionUpdateHandler(client: AcpClient): () => void {
     const store = sessionStore.getState();
     store.ensureSession(sessionId);
 
-    switch (update.sessionUpdate) {
+    if ((notification as ProtocolSessionNotification).protocolVersion === 2) {
+      const v2 = notification as Extract<ProtocolSessionNotification, { protocolVersion: 2 }>;
+      const raw = v2.update as unknown as Record<string, unknown>;
+      switch (raw.sessionUpdate) {
+        case 'user_message':
+          flushSessionBatcher(sessionId);
+          store.replaceContent(sessionId, String(raw.messageId), 'user', 'content' in raw ? raw.content as ContentBlock[] | null : undefined);
+          break;
+        case 'agent_message':
+          flushSessionBatcher(sessionId);
+          store.replaceContent(sessionId, String(raw.messageId), 'agent', 'content' in raw ? raw.content as ContentBlock[] | null : undefined);
+          break;
+        case 'agent_thought':
+          flushSessionBatcher(sessionId);
+          store.replaceThought(sessionId, String(raw.messageId), 'content' in raw ? raw.content as ContentBlock[] | null : undefined);
+          break;
+        case 'user_message_chunk':
+        case 'agent_message_chunk':
+        case 'agent_thought_chunk': {
+          flushSessionBatcher(sessionId);
+          const role = raw.sessionUpdate === 'user_message_chunk' ? 'user' : 'agent';
+          const messageId = String(raw.messageId);
+          const content = raw.content as unknown as ContentBlock;
+          if (raw.sessionUpdate === 'agent_thought_chunk') store.appendThought(sessionId, messageId, 'agent', content);
+          else store.appendContent(sessionId, messageId, role, content);
+          break;
+        }
+        case 'state_update': {
+          if (raw.state === 'running') store.setIsStreaming(sessionId, true);
+          if (raw.state === 'idle') {
+            store.setIsStreaming(sessionId, false);
+            if (typeof raw.stopReason === 'string' && raw.stopReason !== 'end_turn') {
+              const messageId = [...(sessionStore.getState().sessions.get(sessionId)?.messages ?? [])]
+                .reverse()
+                .find((message) => message.role === 'agent')?.id;
+              store.setStopReason(sessionId, raw.stopReason as never, messageId);
+            }
+          }
+          // Permission/action waits are still part of the foreground turn.
+          // Keep the session busy so queued prompts cannot overtake it.
+          if (raw.state === 'requires_action') store.setIsStreaming(sessionId, true);
+          break;
+        }
+        case 'tool_call_update': {
+          flushSessionBatcher(sessionId);
+          const toolCallId = String(raw.toolCallId);
+          const updateData = normalizeV2ToolCallPatch(raw);
+          const existing = sessionStore.getState().sessions.get(sessionId)?.pendingToolCalls.get(toolCallId);
+          if (existing) store.updateToolCall(sessionId, toolCallId, updateData as Partial<ToolCallState>);
+          else store.upsertToolCall(sessionId, {
+            toolCallId,
+            title: typeof raw.title === 'string' ? raw.title : 'Tool call',
+            kind: typeof raw.kind === 'string' ? raw.kind as ToolCallState['kind'] : 'other',
+            status: typeof raw.status === 'string' ? raw.status as ToolCallState['status'] : 'pending',
+            content: Array.isArray(raw.content) ? raw.content as unknown as ToolCallContent[] : [],
+            locations: Array.isArray(raw.locations) ? raw.locations as unknown as ToolCallState['locations'] : [],
+            rawInput: raw.rawInput ?? null,
+            rawOutput: raw.rawOutput ?? null,
+          });
+          break;
+        }
+        case 'tool_call_content_chunk':
+          flushSessionBatcher(sessionId);
+          if (!sessionStore.getState().sessions.get(sessionId)?.pendingToolCalls.has(String(raw.toolCallId))) {
+            store.upsertToolCall(sessionId, {
+              toolCallId: String(raw.toolCallId),
+              title: 'Tool call',
+              kind: 'other',
+              status: 'in_progress',
+              content: [],
+            });
+          }
+          store.appendToolCallContent(sessionId, String(raw.toolCallId), raw.content as unknown as ToolCallContent);
+          break;
+        case 'plan_update': {
+          const plan = raw.plan as { type?: string; entries?: unknown[] } | undefined;
+          if (plan?.type === 'items' && typeof (plan as { planId?: unknown }).planId === 'string') {
+            flushSessionBatcher(sessionId);
+            store.upsertPlan(sessionId, (plan as { planId: string }).planId, (plan.entries ?? []) as unknown as import('@agentclientprotocol/sdk').PlanEntry[]);
+          }
+          break;
+        }
+        case 'plan_removed':
+          store.removePlan(sessionId, String(raw.planId));
+          break;
+        case 'terminal_update': {
+          const terminal = raw as { terminalId: string; command?: string | null; cwd?: string | null; output?: { data?: string; _meta?: Record<string, unknown> | null } | null; exitStatus?: Record<string, unknown> | null; _meta?: Record<string, unknown> | null };
+          store.updateTerminal(sessionId, {
+            terminalId: String(terminal.terminalId),
+            ...(Object.prototype.hasOwnProperty.call(raw, 'command') ? { command: terminal.command } : {}),
+            ...(Object.prototype.hasOwnProperty.call(raw, 'cwd') ? { cwd: terminal.cwd } : {}),
+            ...(Object.prototype.hasOwnProperty.call(raw, 'output') ? { outputBase64: terminal.output?.data ?? null } : {}),
+            ...(Object.prototype.hasOwnProperty.call(raw, 'output') ? { outputMeta: terminal.output?._meta ?? null } : {}),
+            ...(Object.prototype.hasOwnProperty.call(raw, 'exitStatus') ? { exitStatus: terminal.exitStatus ?? null } : {}),
+            ...(Object.prototype.hasOwnProperty.call(raw, '_meta') ? { _meta: terminal._meta } : {}),
+          });
+          break;
+        }
+        case 'terminal_output_chunk': {
+          const terminal = raw as { terminalId: string; data: string };
+          store.appendTerminalOutput(sessionId, String(terminal.terminalId), terminal.data);
+          break;
+        }
+        case 'config_option_update':
+          store.setConfigOptions(sessionId, normalizeV2ConfigOptions(raw.configOptions));
+          break;
+        case 'available_commands_update':
+          store.setAvailableCommands(sessionId, raw.availableCommands as unknown as import('@agentclientprotocol/sdk').AvailableCommand[]);
+          break;
+        case 'usage_update':
+          store.setUsage(sessionId, raw as unknown as import('@agentclientprotocol/sdk').UsageUpdate);
+          break;
+        case 'session_info_update': {
+          const patch: Record<string, string | undefined> = {};
+          if ('title' in raw) patch.title = raw.title == null ? undefined : String(raw.title);
+          if ('updatedAt' in raw) patch.updatedAt = raw.updatedAt == null ? undefined : String(raw.updatedAt);
+          acpStore.getState().updateSession(sessionId, patch);
+          break;
+        }
+      }
+      return;
+    }
+
+    const legacyUpdate = update as import('@agentclientprotocol/sdk').SessionUpdate;
+    switch (legacyUpdate.sessionUpdate) {
       case 'agent_message_chunk':
         // agent 消息打断 user/thought 的连续性
         clearMsgIdCache(sessionId, 'user', 'thought');
-        if ('content' in update && update.content) {
-          const msgId = resolveMsgId(sessionId, 'agent', (update as { messageId?: string }).messageId);
-          if (isTextBlock(update.content)) {
-            enqueueTextChunk(sessionId, msgId, 'agent', 'content', update.content.text);
+        if ('content' in legacyUpdate && legacyUpdate.content) {
+          const msgId = resolveMsgId(sessionId, 'agent', (legacyUpdate as { messageId?: string }).messageId);
+          if (isTextBlock(legacyUpdate.content)) {
+            enqueueTextChunk(sessionId, msgId, 'agent', 'content', legacyUpdate.content.text);
           } else {
             // Non-text block (e.g. tool_use, tool_result) — flush batched text first
             flushSessionBatcher(sessionId);
-            store.appendContent(sessionId, msgId, 'agent', update.content);
+            store.appendContent(sessionId, msgId, 'agent', legacyUpdate.content);
           }
         }
         break;
       case 'user_message_chunk':
         // user 消息打断 agent/thought 的连续性
         clearMsgIdCache(sessionId, 'agent', 'thought');
-        if ('content' in update && update.content) {
-          const msgId = resolveMsgId(sessionId, 'user', (update as { messageId?: string }).messageId);
-          if (isTextBlock(update.content)) {
-            enqueueTextChunk(sessionId, msgId, 'user', 'content', update.content.text);
+        if ('content' in legacyUpdate && legacyUpdate.content) {
+          const msgId = resolveMsgId(sessionId, 'user', (legacyUpdate as { messageId?: string }).messageId);
+          if (isTextBlock(legacyUpdate.content)) {
+            enqueueTextChunk(sessionId, msgId, 'user', 'content', legacyUpdate.content.text);
           } else {
             flushSessionBatcher(sessionId);
-            store.appendContent(sessionId, msgId, 'user', update.content);
+            store.appendContent(sessionId, msgId, 'user', legacyUpdate.content);
           }
         }
         break;
       case 'agent_thought_chunk':
         // thought 消息打断 user/agent 的连续性
         clearMsgIdCache(sessionId, 'user', 'agent');
-        if ('content' in update && update.content) {
-          const msgId = resolveMsgId(sessionId, 'thought', (update as { messageId?: string }).messageId);
-          if (isTextBlock(update.content)) {
-            enqueueTextChunk(sessionId, msgId, 'agent', 'thought', update.content.text);
+        if ('content' in legacyUpdate && legacyUpdate.content) {
+          const msgId = resolveMsgId(sessionId, 'thought', (legacyUpdate as { messageId?: string }).messageId);
+          if (isTextBlock(legacyUpdate.content)) {
+            enqueueTextChunk(sessionId, msgId, 'agent', 'thought', legacyUpdate.content.text);
           } else {
             flushSessionBatcher(sessionId);
-            store.appendThought(sessionId, msgId, 'agent', update.content);
+            store.appendThought(sessionId, msgId, 'agent', legacyUpdate.content);
           }
         }
         break;
@@ -228,14 +391,14 @@ function setupSessionUpdateHandler(client: AcpClient): () => void {
         // 打断所有角色的连续性
         clearMsgIdCache(sessionId, 'user', 'agent', 'thought');
         store.upsertToolCall(sessionId, {
-          toolCallId: update.toolCallId,
-          title: update.title,
-          content: update.content || [],
-          locations: update.locations,
-          status: update.status,
-          kind: update.kind,
-          rawInput: update.rawInput,
-          rawOutput: update.rawOutput,
+          toolCallId: legacyUpdate.toolCallId,
+          title: legacyUpdate.title,
+          content: legacyUpdate.content || [],
+          locations: legacyUpdate.locations,
+          status: legacyUpdate.status,
+          kind: legacyUpdate.kind,
+          rawInput: legacyUpdate.rawInput,
+          rawOutput: legacyUpdate.rawOutput,
         });
         break;
       case 'tool_call_update':
@@ -245,14 +408,14 @@ function setupSessionUpdateHandler(client: AcpClient): () => void {
         clearMsgIdCache(sessionId, 'user', 'agent', 'thought');
         {
           const updateData: Record<string, unknown> = {};
-          if (update.content !== undefined) updateData['content'] = update.content;
-          if (update.status !== undefined) updateData['status'] = update.status;
-          if (update.rawOutput !== undefined) updateData['rawOutput'] = update.rawOutput;
-          if (update.title) updateData['title'] = update.title;
-          if (update.locations !== undefined) updateData['locations'] = update.locations;
-          if (update.kind !== undefined) updateData['kind'] = update.kind;
-          if (update.rawInput !== undefined) updateData['rawInput'] = update.rawInput;
-          store.updateToolCall(sessionId, update.toolCallId, updateData as Partial<ToolCallState>);
+          if (legacyUpdate.content !== undefined) updateData['content'] = legacyUpdate.content;
+          if (legacyUpdate.status !== undefined) updateData['status'] = legacyUpdate.status;
+          if (legacyUpdate.rawOutput !== undefined) updateData['rawOutput'] = legacyUpdate.rawOutput;
+          if (legacyUpdate.title) updateData['title'] = legacyUpdate.title;
+          if (legacyUpdate.locations !== undefined) updateData['locations'] = legacyUpdate.locations;
+          if (legacyUpdate.kind !== undefined) updateData['kind'] = legacyUpdate.kind;
+          if (legacyUpdate.rawInput !== undefined) updateData['rawInput'] = legacyUpdate.rawInput;
+          store.updateToolCall(sessionId, legacyUpdate.toolCallId, updateData as Partial<ToolCallState>);
         }
         break;
       case 'plan':
@@ -260,23 +423,23 @@ function setupSessionUpdateHandler(client: AcpClient): () => void {
         flushSessionBatcher(sessionId);
         // 打断所有角色的连续性
         clearMsgIdCache(sessionId, 'user', 'agent', 'thought');
-        store.setPlan(sessionId, update.entries);
+        store.setPlan(sessionId, legacyUpdate.entries);
         break;
       case 'session_info_update': {
         const patch: Record<string, string | undefined> = {};
-        if ('title' in update) patch.title = update.title ?? undefined;
-        if ('updatedAt' in update) patch.updatedAt = update.updatedAt ?? undefined;
+        if ('title' in legacyUpdate) patch.title = legacyUpdate.title ?? undefined;
+        if ('updatedAt' in legacyUpdate) patch.updatedAt = legacyUpdate.updatedAt ?? undefined;
         acpStore.getState().updateSession(sessionId, patch);
         break;
       }
       case 'usage_update':
-        store.setUsage(sessionId, update);
+        store.setUsage(sessionId, legacyUpdate);
         break;
       case 'config_option_update':
-        store.setConfigOptions(sessionId, update.configOptions);
+        store.setConfigOptions(sessionId, legacyUpdate.configOptions);
         break;
       case 'available_commands_update':
-        store.setAvailableCommands(sessionId, update.availableCommands);
+        store.setAvailableCommands(sessionId, legacyUpdate.availableCommands);
         break;
     }
   });
@@ -296,6 +459,7 @@ function buildCapabilities(
 export function createAcpProvider(
   options: MultiAgentProviderOptions,
   stdioFactory: StdioTransportFactory | null = null,
+  terminalAuthFactory: TerminalAuthFactory | null = null,
 ): MultiAgentProviderInstance {
   const { agents = [] } = options;
   const scopedClientRegistry = new Map<string, AcpClient>();
@@ -316,6 +480,9 @@ export function createAcpProvider(
           id: `perm_${++permissionIdCounter}`,
           sessionId: req.sessionId,
           toolCall: req.toolCall,
+          title: req.title,
+          description: req.description,
+          subject: req.subject,
           options: req.options,
           resolve: (optionId: string) => {
             if (settled) return;
@@ -358,6 +525,9 @@ export function createAcpProvider(
     // 'stdio' }` configs resolve against the host's spawn capability. A null
     // factory (web host) leaves stdio configs to fail fast in createTransport.
     client.setStdioTransportFactory(stdioFactory);
+    // Keep provider tests and embedders that wrap AcpClient compatible with
+    // older client facades while the optional host capability is adopted.
+    client.setTerminalAuthFactory?.(terminalAuthFactory);
 
     // Register client immediately so getClient works during connection
     scopedClientRegistry.set(config.id, client);
@@ -390,6 +560,7 @@ export function createAcpProvider(
       status: 'connected',
       authMethods: initRes.authMethods ?? [],
       protocolVersion: client.protocolVersion ?? undefined,
+      hasSession: client.hasSession,
     });
 
     console.log(`Agent ${config.id} connected successfully.`);
@@ -408,7 +579,7 @@ export function createAcpProvider(
   function refreshWorkspaceSessions(cwd: string): void {
     const ws = acpStore.getState().workspaces.get(cwd);
     for (const [agentId, client] of scopedClientRegistry) {
-      if (!client.capabilities?.sessionCapabilities?.list) continue;
+      if (!client.hasSession && !client.capabilities?.sessionCapabilities?.list) continue;
       // Skip if this workspace already has sessions for this agent
       if (ws) {
         let hasSessions = false;
@@ -497,7 +668,7 @@ export function createAcpProvider(
     // iterates all agents, but its "skip if this agent already has sessions
     // in this workspace" guard makes it a no-op for the already-loaded ones).
     const client = scopedClientRegistry.get(config.id);
-    if (client?.capabilities?.sessionCapabilities?.list) {
+    if (client?.hasSession || client?.capabilities?.sessionCapabilities?.list) {
       for (const cwd of knownCwds) {
         client.listSessions(undefined, cwd).then((res) => {
           acpStore.getState().setSessions(res.sessions, config.id, cwd);

@@ -15,6 +15,7 @@ import {
 import type { ToolCallState, SessionId } from '@acp-components/core';
 import type { ToolCallLocation } from '@acp-components/core';
 import { DiffView } from '../diff-view';
+import { useSessionTerminals } from '../../hooks/useSession';
 import styles from './tool-call.module.scss';
 
 export interface ToolCallCardProps {
@@ -93,9 +94,10 @@ function LocationChip({ loc, onNavigate }: { loc: ToolCallLocation; onNavigate?:
   );
 }
 
-export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onNavigate, expanded, onExpandedChange }: ToolCallCardProps) {
+export const ToolCallCard = React.memo(function ToolCallCard({ sessionId, toolCall, onNavigate, expanded, onExpandedChange }: ToolCallCardProps) {
   const hasContent = toolCall.content && toolCall.content.length > 0;
   const hasLocations = toolCall.locations && toolCall.locations.length > 0;
+  const terminals = useSessionTerminals(sessionId);
 
   return (
     <div className={styles.acpToolCall}>
@@ -131,12 +133,56 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onNavig
                 return <pre key={i} className={styles.acpToolCallContentText}>{c.content.text}</pre>;
               }
               case 'diff': {
-                const d = item as unknown as { path: string; oldText?: string | null; newText: string };
+                const d = item as unknown as {
+                  path?: string;
+                  oldText?: string | null;
+                  newText?: string;
+                  changes?: Array<{ path?: string; oldPath?: string; fileType?: string }>;
+                  patch?: { text?: string } | null;
+                };
+                type DiffItem = {
+                  path: string;
+                  oldText?: string;
+                  newText: string;
+                  fileType?: string;
+                };
+                const changes = d.changes ?? [];
+                // Keep the v1 text shape working while accepting the v2
+                // structured change/patch shape on the same UI surface.
+                const diffItems: DiffItem[] = changes.length > 0
+                  ? changes.map((change) => ({
+                    path: change.path ?? change.oldPath ?? 'unknown path',
+                    newText: '',
+                    fileType: change.fileType,
+                  }))
+                  : d.path
+                    ? [{ path: d.path, oldText: d.oldText ?? undefined, newText: d.newText ?? '' }]
+                    : [{ path: 'diff', newText: '' }];
                 return (
                   <DiffView
                     key={i}
-                    diffs={[{ path: d.path, oldText: d.oldText ?? undefined, newText: d.newText }]}
+                    diffs={diffItems.map((change, changeIndex) => ({
+                      path: change.path,
+                      oldText: 'oldText' in change ? change.oldText : undefined,
+                      newText: change.newText,
+                      // A patch can cover several structured changes; show it
+                      // once instead of duplicating the complete patch.
+                      patchText: changeIndex === 0 ? d.patch?.text : undefined,
+                      fileType: change.fileType,
+                    }))}
                   />
+                );
+              }
+              case 'terminal': {
+                const terminalId = (item as unknown as { terminalId: string }).terminalId;
+                const terminal = terminals.find((entry) => entry.terminalId === terminalId);
+                const output = terminal?.outputBytes
+                  ? new TextDecoder().decode(terminal.outputBytes)
+                  : (terminal?.outputChunks ?? []).join('');
+                return (
+                  <pre key={i} className={styles.acpToolCallContentText} data-terminal-id={terminalId}>
+                    {output}
+                  </pre>
                 );
               }
               default:

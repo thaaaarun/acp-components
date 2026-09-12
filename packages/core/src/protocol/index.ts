@@ -6,4 +6,6 @@ export type {
   PermissionHandler,
   ProtocolAdapter,
   SessionUpdateHandler,
+  NormalizedPermissionRequest,
+  ProtocolSessionNotification,
 } from './types';

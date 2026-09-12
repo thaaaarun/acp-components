@@ -109,6 +109,12 @@ export interface PlatformProcess {
    * Called once per `AcpClient.connect()` for `{ type: 'stdio' }` configs.
    */
   createStdioTransport(options: StdioTransportOptions): AcpTransport;
+  /** Run ACP v2 terminal authentication in a host-owned interactive process. */
+  runTerminalAuth?(options: {
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+  }): Promise<void>;
 }
 
 /**

@@ -7,6 +7,8 @@ export interface DiffViewProps {
     path: string;
     oldText?: string;
     newText: string;
+    patchText?: string;
+    fileType?: string;
   }>;
 }
 
@@ -30,10 +32,21 @@ export function DiffView({ diffs = [] }: DiffViewProps) {
         {diffs.map((diff, i) => (
           <div key={i} className={styles.acpDiffViewFile}>
             <div className={styles.acpDiffViewFilename}>{diff.path}</div>
-            {diff.oldText && (
-              <div className={styles.acpDiffViewOld}>- {diff.oldText}</div>
+            {diff.fileType && diff.fileType !== 'text' && (
+              <div className={styles.acpDiffViewOld}>{diff.fileType}</div>
             )}
-            <div className={styles.acpDiffViewNew}>+ {diff.newText}</div>
+            {diff.patchText ? (
+              <pre className={styles.acpDiffViewNew}>{diff.patchText}</pre>
+            ) : diff.oldText || diff.newText ? (
+              <>
+                {diff.oldText && (
+                  <div className={styles.acpDiffViewOld}>- {diff.oldText}</div>
+                )}
+                <div className={styles.acpDiffViewNew}>+ {diff.newText}</div>
+              </>
+            ) : (
+              <div className={styles.acpDiffViewOld}>{t('diff.emptyState')}</div>
+            )}
           </div>
         ))}
       </div>

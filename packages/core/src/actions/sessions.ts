@@ -113,9 +113,11 @@ export async function setSessionConfigOption(
   const prev = sessionStore.getState().sessions.get(sessionId)?.configOptions;
   try {
     const res = await client.setSessionConfigOption(sessionId, configId, value);
-    sessionStore.getState().setConfigOptions(sessionId, res.configOptions);
+    if (res.configOptions) {
+      sessionStore.getState().setConfigOptions(sessionId, res.configOptions);
+    }
     const agentId = agentIdForSession(sessionId);
-    if (agentId) cacheAgentConfigOptions(agentId, res.configOptions);
+    if (agentId && res.configOptions) cacheAgentConfigOptions(agentId, res.configOptions);
   } catch {
     if (prev) {
       sessionStore.getState().setConfigOptions(sessionId, prev);
@@ -126,6 +128,10 @@ export async function setSessionConfigOption(
 export async function authenticate(client: AcpClient, methodId: string): Promise<void> {
   await client.authenticate(methodId);
   acpStore.getState().clearAuthRequired();
+}
+
+export async function logout(client: AcpClient): Promise<void> {
+  await client.logout();
 }
 
 export async function authenticateWithEnv(

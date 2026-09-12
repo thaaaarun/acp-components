@@ -188,6 +188,65 @@ describe('sessionStore — appendThought', () => {
   });
 });
 
+describe('sessionStore — v2 replacement semantics', () => {
+  beforeEach(() => {
+    sessionStore.getState().ensureSession(SID);
+  });
+
+  it('distinguishes omitted, replacement, and null message content', () => {
+    sessionStore.getState().appendContent(SID, 'm1', 'agent', textBlock('old'));
+    sessionStore.getState().replaceContent(SID, 'm1', 'agent', undefined);
+    expect(getState().messages[0].parts).toEqual([{ type: 'content', content: [textBlock('old')] }]);
+
+    sessionStore.getState().replaceContent(SID, 'm1', 'agent', [textBlock('new')]);
+    expect(getState().messages[0].parts).toEqual([{ type: 'content', content: [textBlock('new')] }]);
+
+    sessionStore.getState().replaceContent(SID, 'm1', 'agent', null);
+    expect(getState().messages[0].parts).toEqual([]);
+  });
+
+  it('replaces only the addressed message part', () => {
+    sessionStore.getState().appendContent(SID, 'm1', 'agent', textBlock('answer'));
+    sessionStore.getState().upsertToolCall(SID, {
+      toolCallId: 'tool-1', title: 'Read', kind: 'read', status: 'completed', content: [],
+    });
+    const message = getState().messages.find((entry) => entry.id === 'm1')!;
+    expect(message.parts.map((part) => part.type)).toEqual(['content', 'tool_calls']);
+
+    // A whole-message update may replace content without deleting unrelated
+    // parts if a host has coalesced them into the same application message.
+    sessionStore.getState().replaceContent(SID, 'm1', 'agent', [textBlock('updated')]);
+    const updated = getState().messages.find((entry) => entry.id === 'm1')!;
+    expect(updated.parts[0]).toEqual({ type: 'content', content: [textBlock('updated')] });
+    expect(updated.parts[1].type).toBe('tool_calls');
+  });
+
+  it('appends independently encoded terminal chunks as decoded bytes', () => {
+    sessionStore.getState().updateTerminal(SID, { terminalId: 'term', outputBase64: 'SGU=' });
+    sessionStore.getState().appendTerminalOutput(SID, 'term', 'bGxv');
+    const terminal = getState().terminals.get('term')!;
+    expect(new TextDecoder().decode(terminal.outputBytes)).toBe('Hello');
+
+    sessionStore.getState().updateTerminal(SID, { terminalId: 'term', outputBase64: 'TmV3' });
+    expect(new TextDecoder().decode(getState().terminals.get('term')!.outputBytes)).toBe('New');
+    expect(getState().terminals.get('term')!.outputChunks).toEqual([]);
+  });
+
+  it('updates and removes plans independently by plan id', () => {
+    const first = [{ content: 'first', priority: 'high', status: 'pending' }] as PlanEntry[];
+    const second = [{ content: 'second', priority: 'low', status: 'pending' }] as PlanEntry[];
+    sessionStore.getState().upsertPlan(SID, 'p1', first);
+    sessionStore.getState().upsertPlan(SID, 'p2', second);
+    sessionStore.getState().upsertPlan(SID, 'p1', [{ ...first[0], status: 'completed' }]);
+    sessionStore.getState().removePlan(SID, 'p1');
+
+    const plans = getState().messages.flatMap((message) => message.parts.filter((part) => part.type === 'plan'));
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({ planId: 'p2', plan: second });
+    expect(getState().plan).toEqual(second);
+  });
+});
+
 describe('sessionStore — tool calls', () => {
   const tc = (id: string, expanded?: boolean): ToolCallState => ({
     toolCallId: id,

@@ -16,16 +16,14 @@ import type {
   PromptRequest,
   PromptResponse,
   SetSessionConfigOptionResponse,
-  RequestPermissionRequest,
   RequestPermissionResponse,
-  SessionNotification,
 } from '@agentclientprotocol/sdk';
 import { HttpTransport, WebSocketTransport } from '../transport';
 import type { AcpTransport, StdioTransportOptions } from '../transport';
 import type { ConnectionStatus, TransportConfig } from '../types';
 import type { Skill } from '../store/skillStore';
 import { ProtocolNegotiator } from '../protocol';
-import type { AcpProtocolVersion } from '../protocol';
+import type { AcpProtocolVersion, NormalizedPermissionRequest, ProtocolSessionNotification } from '../protocol';
 
 /**
  * Host-injected factory that turns a stdio spawn config into a concrete
@@ -37,8 +35,15 @@ import type { AcpProtocolVersion } from '../protocol';
  */
 export type StdioTransportFactory = (options: StdioTransportOptions) => AcpTransport;
 
-export type SessionUpdateHandler = (update: SessionNotification) => void;
-export type PermissionHandler = (request: RequestPermissionRequest) => Promise<RequestPermissionResponse>;
+/** Host-native runner for ACP v2 terminal authentication. */
+export type TerminalAuthFactory = (options: {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}) => Promise<void>;
+
+export type SessionUpdateHandler = (update: ProtocolSessionNotification) => void;
+export type PermissionHandler = (request: NormalizedPermissionRequest) => Promise<RequestPermissionResponse>;
 
 /**
  * A skill entry already normalized to the core `Skill` shape, paired with the
@@ -149,6 +154,7 @@ export class AcpClient {
   private _status: ConnectionStatus = 'disconnected';
   private _agentInfo: Implementation | null = null;
   private _capabilities: AgentCapabilities | null = null;
+  private _hasSession = false;
   private _clientInfo: Implementation | undefined = undefined;
   private _clientCapabilities: ClientCapabilities | undefined = undefined;
 
@@ -164,6 +170,8 @@ export class AcpClient {
    * throws in `createTransport`.
    */
   private stdioFactory: StdioTransportFactory | null = null;
+  private terminalAuthFactory: TerminalAuthFactory | null = null;
+  private authMethods: import('../types').AuthMethod[] = [];
 
   /**
    * Inject the host stdio transport factory. Called once by the provider before
@@ -172,6 +180,10 @@ export class AcpClient {
    */
   setStdioTransportFactory(factory: StdioTransportFactory | null): void {
     this.stdioFactory = factory;
+  }
+
+  setTerminalAuthFactory(factory: TerminalAuthFactory | null): void {
+    this.terminalAuthFactory = factory;
   }
 
   get status(): ConnectionStatus {
@@ -184,6 +196,10 @@ export class AcpClient {
 
   get capabilities(): AgentCapabilities | null {
     return this._capabilities;
+  }
+
+  get hasSession(): boolean {
+    return this._hasSession;
   }
 
   get protocolVersion(): AcpProtocolVersion | null {
@@ -235,20 +251,25 @@ export class AcpClient {
     }
     this._transportConfig = config;
     this.closeNotified = false;
-    this.transport = createTransport(config, this.stdioFactory);
     this.setStatus('connecting');
 
-    this.transport.onClose?.(() => {
-      this.notifyClosed();
-    });
+    const openTransport = async (): Promise<import('../protocol').AcpWireStream> => {
+      // Protocol fallback is a new connection. This matters for stdio hosts:
+      // an exited/initialized child cannot be reused for the second handshake.
+      this.transport?.disconnect();
+      const next = createTransport(config, this.stdioFactory);
+      this.transport = next;
+      next.onClose?.(() => {
+        if (this.transport === next) this.notifyClosed();
+      });
+      next.onError?.((_err) => {
+        if (this.transport === next) this.setStatus('error');
+      });
+      return next.connect();
+    };
 
-    this.transport.onError?.((_err) => {
-      this.setStatus('error');
-    });
-
-    const transport = this.transport;
     this.negotiator = new ProtocolNegotiator({
-      createStream: () => transport.connect(),
+      createStream: openTransport,
       onSessionUpdate: (notification) => {
         for (const h of this.sessionUpdateHandlers) h(notification);
       },
@@ -270,7 +291,7 @@ export class AcpClient {
    * permission handler if set; otherwise auto-selects the first option
    * (preserving the legacy behaviour).
    */
-  private async handlePermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
+  private async handlePermission(params: NormalizedPermissionRequest): Promise<RequestPermissionResponse> {
     if (this.permissionHandler) {
       return this.permissionHandler(params);
     }
@@ -283,11 +304,19 @@ export class AcpClient {
     if (!this.negotiator) throw new Error('Not connected');
 
     this._clientInfo = clientInfo;
-    this._clientCapabilities = clientCapabilities;
+    const effectiveClientCapabilities = this.terminalAuthFactory && this._transportConfig?.type === 'stdio'
+      ? {
+        ...clientCapabilities,
+        auth: { ...clientCapabilities?.auth, terminal: true },
+      }
+      : clientCapabilities;
+    this._clientCapabilities = effectiveClientCapabilities;
 
-    const res = await this.negotiator.initialize(clientInfo, clientCapabilities);
+    const res = await this.negotiator.initialize(clientInfo, effectiveClientCapabilities);
     this._agentInfo = res.agentInfo ?? null;
     this._capabilities = res.capabilities ?? null;
+    this._hasSession = res.hasSession ?? !!res.capabilities?.sessionCapabilities?.list;
+    this.authMethods = res.authMethods ?? [];
     this.setStatus('connected');
     return res.response;
   }
@@ -313,7 +342,7 @@ export class AcpClient {
   }
 
   async loadSession(sessionId: string, cwd: string, mcpServers: LoadSessionRequest['mcpServers'] = []): Promise<LoadSessionResponse> {
-    return this.requireAdapter().resumeSession(sessionId, cwd, mcpServers) as Promise<LoadSessionResponse>;
+    return this.requireAdapter().resumeSession(sessionId, cwd, mcpServers, true) as Promise<LoadSessionResponse>;
   }
 
   async setSessionConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<SetSessionConfigOptionResponse> {
@@ -329,7 +358,33 @@ export class AcpClient {
   }
 
   async authenticate(methodId: string): Promise<AuthenticateResponse> {
+    const authMethod = this.authMethods.find((method) => method.id === methodId);
+    if (this.protocolVersion === 2 && authMethod && 'type' in authMethod && authMethod.type === 'terminal') {
+      if (this.protocolVersion !== 2) throw new Error('Terminal authentication is only available in ACP v2');
+      if (!this.terminalAuthFactory) throw new Error('Terminal authentication requires a host process capability');
+      const transport = this._transportConfig;
+      if (!transport || transport.type !== 'stdio') {
+        throw new Error('Terminal authentication requires a stdio agent transport');
+      }
+      const rawEnv = (authMethod as { env?: Record<string, string> | Array<{ name: string; value: string }> }).env;
+      const methodEnv = Array.isArray(rawEnv)
+        ? rawEnv.reduce<Record<string, string>>((result, item) => {
+          result[item.name] = item.value;
+          return result;
+        }, {})
+        : rawEnv ?? {};
+      await this.terminalAuthFactory({
+        command: transport.command,
+        args: [...(transport.args ?? []), ...((authMethod as { args?: string[] }).args ?? [])],
+        env: { ...transport.env, ...methodEnv },
+      });
+      return {} as AuthenticateResponse;
+    }
     return this.requireAdapter().login(methodId) as Promise<AuthenticateResponse>;
+  }
+
+  async logout(): Promise<void> {
+    await this.requireAdapter().logout();
   }
 
   async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
