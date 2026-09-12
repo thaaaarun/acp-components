@@ -1,5 +1,4 @@
-import type { Stream, AnyMessage } from '@agentclientprotocol/sdk';
-import type { AcpTransport } from './types';
+import type { AcpTransport, AcpWireStream } from './types';
 
 interface WsTransportOptions {
   url: string;
@@ -12,7 +11,7 @@ export class WebSocketTransport implements AcpTransport {
 
   constructor(private options: WsTransportOptions) {}
 
-  async connect(): Promise<Stream> {
+  async connect(): Promise<AcpWireStream> {
     const ws = new WebSocket(this.options.url);
     this.ws = ws;
 
@@ -21,17 +20,17 @@ export class WebSocketTransport implements AcpTransport {
       ws.onerror = () => reject(new Error('WebSocket connection failed'));
     });
 
-    const writable = new WritableStream<AnyMessage>({
+    const writable = new WritableStream<unknown>({
       write: (msg) => {
         ws.send(JSON.stringify(msg));
       },
     });
 
-    const readable = new ReadableStream<AnyMessage>({
+    const readable = new ReadableStream<unknown>({
       start: (controller) => {
         ws.onmessage = (event) => {
           try {
-            const msg = JSON.parse(event.data as string) as AnyMessage;
+            const msg = JSON.parse(event.data as string) as unknown;
             controller.enqueue(msg);
           } catch (err) {
             controller.error(err);

@@ -1,6 +1,5 @@
-import type { Stream, AnyMessage } from '@agentclientprotocol/sdk';
 import { createHttpStream } from '@agentclientprotocol/sdk/experimental/http-client';
-import type { AcpTransport } from './types';
+import type { AcpTransport, AcpWireStream } from './types';
 
 interface HttpTransportOptions {
   url: string;
@@ -8,14 +7,14 @@ interface HttpTransportOptions {
 }
 
 export class HttpTransport implements AcpTransport {
-  private reader: ReadableStreamDefaultReader<AnyMessage> | null = null;
+  private reader: ReadableStreamDefaultReader<unknown> | null = null;
   private closeHandlers: Array<() => void> = [];
   private errorHandlers: Array<(err: Error) => void> = [];
   private disconnecting = false;
 
   constructor(private options: HttpTransportOptions) {}
 
-  async connect(): Promise<Stream> {
+  async connect(): Promise<AcpWireStream> {
     this.disconnecting = false;
     const { url, headers } = this.options;
 
@@ -32,7 +31,7 @@ export class HttpTransport implements AcpTransport {
     // onClose/onError lifecycle callbacks. The SDK's app.connect(stream)
     // reads from this wrapper; we pump messages from the inner readable and
     // detect when it ends or errors.
-    const readable = new ReadableStream<AnyMessage>({
+    const readable = new ReadableStream<unknown>({
       start: (controller) => {
         this.reader = inner.readable.getReader();
 

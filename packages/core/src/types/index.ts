@@ -12,7 +12,6 @@ import type {
   PermissionOption,
   ClientCapabilities,
   PlanEntry,
-  AuthMethod,
   AvailableCommand,
   PromptResponse,
   UsageUpdate,
@@ -20,12 +19,13 @@ import type {
   PromptCapabilities,
   SessionConfigSelectOptions,
   SessionConfigSelectGroup,
-  AuthMethodEnvVar,
   ToolCallLocation,
   ToolKind,
 } from '@agentclientprotocol/sdk';
+import type { AuthMethod as SdkAuthMethod } from '@agentclientprotocol/sdk';
 export { RequestError } from '@agentclientprotocol/sdk';
 import type { AcpTransport } from '../transport/types';
+import type { AcpProtocolVersion } from '../protocol/types';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -100,6 +100,8 @@ export interface AgentConnection {
   agentInfo: Implementation | null;
   capabilities: AgentCapabilities | null;
   authMethods: AuthMethod[];
+  /** Protocol version selected during initialization, when connected. */
+  protocolVersion?: AcpProtocolVersion;
   /**
    * Agent-level cache of the most recently observed `configOptions`
    * (from NewSessionResponse / LoadSessionResponse / set_config_option).
@@ -108,6 +110,20 @@ export interface AgentConnection {
    * session has ever been created.
    */
   configOptions?: SessionConfigOption[];
+}
+
+/** Compatibility shape retained for hosts that expose environment-variable login. */
+export interface AuthMethodEnvVar {
+  type: 'env_var';
+  id: string;
+  name: string;
+  description?: string;
+  vars: Array<{
+    name: string;
+    label?: string;
+    optional?: boolean;
+    secret?: boolean;
+  }>;
 }
 
 export interface WorkspaceState {
@@ -220,4 +236,5 @@ export interface UpdaterState {
   progress?: number;
 }
 
-export type { ContentBlock, SessionId, SessionInfo, SessionUpdate, StopReason, ToolCall, ToolCallUpdate, ToolCallContent, Implementation, AgentCapabilities, PermissionOption, ClientCapabilities, PlanEntry, AuthMethod, AvailableCommand, PromptResponse, UsageUpdate, SessionConfigOption, PromptCapabilities, SessionConfigSelectOptions, SessionConfigSelectGroup, AuthMethodEnvVar, ToolCallLocation, ToolKind };
+export type { ContentBlock, SessionId, SessionInfo, SessionUpdate, StopReason, ToolCall, ToolCallUpdate, ToolCallContent, Implementation, AgentCapabilities, PermissionOption, ClientCapabilities, PlanEntry, AvailableCommand, PromptResponse, UsageUpdate, SessionConfigOption, PromptCapabilities, SessionConfigSelectOptions, SessionConfigSelectGroup, ToolCallLocation, ToolKind };
+export type AuthMethod = SdkAuthMethod | AuthMethodEnvVar;

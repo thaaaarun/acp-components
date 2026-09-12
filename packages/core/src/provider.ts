@@ -389,6 +389,7 @@ export function createAcpProvider(
       capabilities: client.capabilities,
       status: 'connected',
       authMethods: initRes.authMethods ?? [],
+      protocolVersion: client.protocolVersion ?? undefined,
     });
 
     console.log(`Agent ${config.id} connected successfully.`);

@@ -8,7 +8,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.2.1",
+    "@agentclientprotocol/sdk": "1.4.0",
     "@acp-components/core": "workspace:*",
     "@acp-components/react": "workspace:*",
     "monaco-editor": "^0.52.0",

@@ -1,39 +1,31 @@
-import {
-  client,
-  methods,
-  type ClientConnection,
-  type ClientContext,
-  type SessionNotification,
-  type RequestPermissionRequest,
-  type RequestPermissionResponse,
-  type PromptRequest,
-  type PromptResponse,
-  type NewSessionRequest,
-  type NewSessionResponse,
-  type InitializeRequest,
-  type InitializeResponse,
-  type ListSessionsRequest,
-  type ListSessionsResponse,
-  type LoadSessionRequest,
-  type LoadSessionResponse,
-  type SetSessionConfigOptionRequest,
-  type SetSessionConfigOptionResponse,
-  type CancelNotification,
-  type ClientCapabilities,
-  type CloseSessionRequest,
-  type CloseSessionResponse,
-  type DeleteSessionRequest,
-  type DeleteSessionResponse,
-  type ForkSessionRequest,
-  type ForkSessionResponse,
-  type AuthenticateRequest,
-  type AuthenticateResponse,
-  type AgentCapabilities,
+import type {
+  AgentCapabilities,
+  ClientCapabilities,
+  Implementation,
+  InitializeResponse,
+  AuthenticateResponse,
+  CloseSessionResponse,
+  DeleteSessionResponse,
+  ForkSessionRequest,
+  ForkSessionResponse,
+  ListSessionsResponse,
+  LoadSessionRequest,
+  LoadSessionResponse,
+  NewSessionRequest,
+  NewSessionResponse,
+  PromptRequest,
+  PromptResponse,
+  SetSessionConfigOptionResponse,
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionNotification,
 } from '@agentclientprotocol/sdk';
 import { HttpTransport, WebSocketTransport } from '../transport';
 import type { AcpTransport, StdioTransportOptions } from '../transport';
-import type { ConnectionStatus, Implementation, TransportConfig } from '../types';
+import type { ConnectionStatus, TransportConfig } from '../types';
 import type { Skill } from '../store/skillStore';
+import { ProtocolNegotiator } from '../protocol';
+import type { AcpProtocolVersion } from '../protocol';
 
 /**
  * Host-injected factory that turns a stdio spawn config into a concrete
@@ -151,8 +143,7 @@ function createTransport(
 }
 
 export class AcpClient {
-  private connection: ClientConnection | null = null;
-  private context: ClientContext | null = null;
+  private negotiator: ProtocolNegotiator | null = null;
   private transport: AcpTransport | null = null;
   private _transportConfig: TransportConfig | null = null;
   private _status: ConnectionStatus = 'disconnected';
@@ -165,6 +156,7 @@ export class AcpClient {
   private permissionHandler: PermissionHandler | null = null;
   private statusHandlers = new Set<(status: ConnectionStatus) => void>();
   private closeHandlers = new Set<() => void>();
+  private closeNotified = false;
   /**
    * Host-injected stdio transport factory (`Platform.process.createStdioTransport`).
    * Resolved by the React `AcpProvider` and injected before `connect()`. `null`
@@ -194,13 +186,25 @@ export class AcpClient {
     return this._capabilities;
   }
 
+  get protocolVersion(): AcpProtocolVersion | null {
+    return this.negotiator?.version ?? null;
+  }
+
   get signal(): AbortSignal | undefined {
-    return this.connection?.signal;
+    return this.negotiator?.signal;
   }
 
   private setStatus(status: ConnectionStatus): void {
     this._status = status;
     for (const h of this.statusHandlers) h(status);
+  }
+
+  private notifyClosed(): void {
+    if (this.closeNotified) return;
+    this.closeNotified = true;
+    this.setStatus('disconnected');
+    for (const h of this.closeHandlers) h();
+    this.closeHandlers.clear();
   }
 
   onStatusChange(handler: (status: ConnectionStatus) => void): () => void {
@@ -226,52 +230,39 @@ export class AcpClient {
     if (this._status === 'connecting') {
       return;
     }
-    if (this.transport || this.connection) {
+    if (this.transport || this.negotiator) {
       this.disconnect();
     }
     this._transportConfig = config;
+    this.closeNotified = false;
     this.transport = createTransport(config, this.stdioFactory);
     this.setStatus('connecting');
 
     this.transport.onClose?.(() => {
-      this.setStatus('disconnected');
+      this.notifyClosed();
     });
 
     this.transport.onError?.((_err) => {
       this.setStatus('error');
     });
 
-    let stream: Awaited<ReturnType<AcpTransport['connect']>>;
+    const transport = this.transport;
+    this.negotiator = new ProtocolNegotiator({
+      createStream: () => transport.connect(),
+      onSessionUpdate: (notification) => {
+        for (const h of this.sessionUpdateHandlers) h(notification);
+      },
+      onPermission: (request) => this.handlePermission(request),
+      onClose: () => this.notifyClosed(),
+    });
     try {
-      stream = await this.transport.connect();
+      await this.negotiator.connect();
     } catch (err) {
       this.setStatus('error');
       this.transport = null;
+      this.negotiator = null;
       throw err;
     }
-
-    // Build the client app and register the built-in agent→client handlers
-    // BEFORE connecting (the app-builder API requires handlers up front). The
-    // permission handler delegates to a run-time-replaceable field, so callers
-    // can still setPermissionHandler after connect().
-    const app = client({ name: 'acp-components-client' })
-      .onNotification(methods.client.session.update, (ctx) => {
-        for (const h of this.sessionUpdateHandlers) h(ctx.params);
-      })
-      .onRequest(methods.client.session.requestPermission, (ctx) => this.handlePermission(ctx.params));
-
-    this.connection = app.connect(stream);
-    this.context = this.connection.agent;
-
-    this.connection.closed.then(() => {
-      this.setStatus('disconnected');
-      for (const h of this.closeHandlers) h();
-      this.closeHandlers.clear();
-    }).catch(() => {
-      this.setStatus('disconnected');
-      for (const h of this.closeHandlers) h();
-      this.closeHandlers.clear();
-    });
   }
 
   /**
@@ -289,91 +280,60 @@ export class AcpClient {
   }
 
   async initialize(clientInfo?: Implementation, clientCapabilities?: ClientCapabilities): Promise<InitializeResponse> {
-    if (!this.context) throw new Error('Not connected');
+    if (!this.negotiator) throw new Error('Not connected');
 
     this._clientInfo = clientInfo;
     this._clientCapabilities = clientCapabilities;
 
-    const req: InitializeRequest = {
-      protocolVersion: 1,
-      clientInfo: clientInfo ?? null,
-      clientCapabilities: clientCapabilities ?? undefined,
-    };
-
-    const res = await this.context.request(methods.agent.initialize, req);
+    const res = await this.negotiator.initialize(clientInfo, clientCapabilities);
     this._agentInfo = res.agentInfo ?? null;
-    this._capabilities = res.agentCapabilities ?? null;
+    this._capabilities = res.capabilities ?? null;
     this.setStatus('connected');
-    return res;
+    return res.response;
   }
 
   async newSession(cwd: string, mcpServers: NewSessionRequest['mcpServers'] = []): Promise<NewSessionResponse> {
-    if (!this.context) throw new Error('Not connected');
-    return this.context.request(methods.agent.session.new, { cwd, mcpServers });
+    return this.requireAdapter().newSession(cwd, mcpServers) as Promise<NewSessionResponse>;
   }
 
   async forkSession(sessionId: string, cwd: string, mcpServers: ForkSessionRequest['mcpServers'] = []): Promise<ForkSessionResponse> {
-    if (!this.context) throw new Error('Not connected');
-    return this.context.request(methods.agent.session.fork, { sessionId, cwd, mcpServers });
+    return this.requireAdapter().forkSession(sessionId, cwd, mcpServers) as Promise<ForkSessionResponse>;
   }
 
   async prompt(sessionId: string, prompt: PromptRequest['prompt']): Promise<PromptResponse> {
-    if (!this.context) throw new Error('Not connected');
-    return this.context.request(methods.agent.session.prompt, { sessionId, prompt });
+    return this.requireAdapter().prompt(sessionId, prompt) as Promise<PromptResponse>;
   }
 
   async cancel(sessionId: string): Promise<void> {
-    if (!this.context) throw new Error('Not connected');
-    const params: CancelNotification = { sessionId };
-    await this.context.notify(methods.agent.session.cancel, params);
+    await this.requireAdapter().cancel(sessionId);
   }
 
   async listSessions(cursor?: string, cwd?: string): Promise<ListSessionsResponse> {
-    if (!this.context) throw new Error('Not connected');
-    const params: ListSessionsRequest = {};
-    if (cursor) params.cursor = cursor;
-    if (cwd) params.cwd = cwd;
-    return this.context.request(methods.agent.session.list, params);
+    return this.requireAdapter().listSessions(cursor, cwd) as Promise<ListSessionsResponse>;
   }
 
   async loadSession(sessionId: string, cwd: string, mcpServers: LoadSessionRequest['mcpServers'] = []): Promise<LoadSessionResponse> {
-    if (!this.context) throw new Error('Not connected');
-    return this.context.request(methods.agent.session.load, { sessionId, cwd, mcpServers });
+    return this.requireAdapter().resumeSession(sessionId, cwd, mcpServers) as Promise<LoadSessionResponse>;
   }
 
   async setSessionConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<SetSessionConfigOptionResponse> {
-    if (!this.context) throw new Error('Not connected');
-    const params: SetSessionConfigOptionRequest = { sessionId, configId } as SetSessionConfigOptionRequest;
-    if (typeof value === 'boolean') {
-      (params as Record<string, unknown>).type = 'boolean';
-      (params as Record<string, unknown>).value = value;
-    } else {
-      (params as Record<string, unknown>).value = value;
-    }
-    return this.context.request(methods.agent.session.setConfigOption, params);
+    return this.requireAdapter().setSessionConfigOption(sessionId, configId, value) as Promise<SetSessionConfigOptionResponse>;
   }
 
   async closeSession(sessionId: string): Promise<CloseSessionResponse> {
-    if (!this.context) throw new Error('Not connected');
-    const params: CloseSessionRequest = { sessionId };
-    return this.context.request(methods.agent.session.close, params);
+    return this.requireAdapter().closeSession(sessionId) as Promise<CloseSessionResponse>;
   }
 
   async deleteSession(sessionId: string): Promise<DeleteSessionResponse> {
-    if (!this.context) throw new Error('Not connected');
-    const params: DeleteSessionRequest = { sessionId };
-    return this.context.request(methods.agent.session.delete, params);
+    return this.requireAdapter().deleteSession(sessionId) as Promise<DeleteSessionResponse>;
   }
 
   async authenticate(methodId: string): Promise<AuthenticateResponse> {
-    if (!this.context) throw new Error('Not connected');
-    const params: AuthenticateRequest = { methodId };
-    return this.context.request(methods.agent.authenticate, params);
+    return this.requireAdapter().login(methodId) as Promise<AuthenticateResponse>;
   }
 
   async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (!this.context) throw new Error('Not connected');
-    return this.context.request<Record<string, unknown>, Record<string, unknown>>(method, params);
+    return this.requireAdapter().extMethod(method, params);
   }
 
   /**
@@ -390,7 +350,7 @@ export class AcpClient {
    *   sending.
    */
   async listSkills(cwds?: string[]): Promise<Skill[]> {
-    if (!this.context) throw new Error('Not connected');
+    if (!this.negotiator) throw new Error('Not connected');
     const params: Record<string, unknown> = {};
     if (cwds && cwds.length > 0) params.cwds = cwds;
     const res = await this.extMethod('_acp/skills/list', params);
@@ -402,17 +362,21 @@ export class AcpClient {
   }
 
   async extNotification(method: string, params: Record<string, unknown>): Promise<void> {
-    if (!this.context) throw new Error('Not connected');
-    await this.context.notify<Record<string, unknown>>(method, params);
+    await this.requireAdapter().extNotification(method, params);
   }
 
   disconnect(): void {
+    const negotiator = this.negotiator;
+    negotiator?.close();
     this.transport?.disconnect();
-    this.connection?.close();
-    // connection.closed handler fires async → setStatus + closeHandlers + clear
-    this.connection = null;
-    this.context = null;
     this.transport = null;
+    this.negotiator = null;
+    if (!negotiator) this.notifyClosed();
+  }
+
+  private requireAdapter() {
+    if (!this.negotiator) throw new Error('Not connected');
+    return this.negotiator.current;
   }
 
   async reconnectWithEnv(additionalEnv: Record<string, string>): Promise<InitializeResponse> {

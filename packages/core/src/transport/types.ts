@@ -1,10 +1,10 @@
-import type { Stream, AnyMessage } from '@agentclientprotocol/sdk';
+import type { AcpWireStream } from '../protocol';
 
 export interface AcpTransport {
-  connect(): Promise<Stream>;
+  connect(): Promise<AcpWireStream>;
   disconnect(): void;
   onClose?: (handler: () => void) => () => void;
   onError?: (handler: (err: Error) => void) => () => void;
 }
 
-export type { Stream, AnyMessage };
+export type { AcpWireStream };
