@@ -57,11 +57,44 @@ export interface MessageBubbleProps {
   onNavigateFile?: (path: string, line?: number | null) => void;
 }
 
+// codex embeds attachment bytes it read back into the model's own prompt as
+// `[@name](uri)\n<context ref="uri" mimeType="..." encoding="base64">\n<base64>\n</context>`,
+// each attachment as its OWN content block (a live send's file input produces
+// a separate item per file, and codex's own rollout storage mirrors that).
+// That's meant for the model, not the UI -- but replaying a session from its
+// real rollout history (session/load) surfaces this raw text verbatim
+// instead of reconstructing a proper resource/image content block. When a
+// whole text block is just that marker, render it as the same attachment
+// chip a live/unloaded resource block gets; otherwise just drop any
+// <context> blob a block's text happens to contain.
+const ATTACHMENT_CONTEXT_BLOCK_RE = /<context\b[^>]*>[\s\S]*?<\/context>/g;
+const ATTACHMENT_ONLY_TEXT_RE = /^\[@([^\]]+)\]\([^)]*\)\s*<context\b[^>]*>[\s\S]*?<\/context>\s*$/;
+
+function stripEmbeddedAttachmentContext(text: string): string {
+  return text.replace(ATTACHMENT_CONTEXT_BLOCK_RE, '').trim();
+}
+
+function AttachmentChip({ name }: { name: string }) {
+  return (
+    <div className={styles.acpMessageBubbleResource}>
+      <span><FileTextOutlined /></span>
+      <div>
+        <div className={styles.acpMessageBubbleResourceName}>{name}</div>
+      </div>
+    </div>
+  );
+}
+
 function renderContent(content: ContentBlock) {
   if (!isUserVisibleContent(content)) return null;
   switch (content.type) {
-    case 'text':
-      return <Markdown>{(content as { text: string }).text}</Markdown>;
+    case 'text': {
+      const text = (content as { text: string }).text;
+      const attachmentOnly = text.match(ATTACHMENT_ONLY_TEXT_RE);
+      if (attachmentOnly) return <AttachmentChip name={attachmentOnly[1]} />;
+      const stripped = stripEmbeddedAttachmentContext(text);
+      return stripped ? <Markdown>{stripped}</Markdown> : null;
+    }
     case 'resource': {
       const res = content as { resource: { uri: string; text?: string; mimeType?: string } };
       const rawName = res.resource.uri.split('/').pop() || res.resource.uri;

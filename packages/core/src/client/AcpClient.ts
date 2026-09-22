@@ -165,6 +165,19 @@ export class AcpClient {
   private permissionHandler: PermissionHandler | null = null;
   private statusHandlers = new Set<(status: ConnectionStatus) => void>();
   private closeHandlers = new Set<() => void>();
+
+  /**
+   * Auto-reconnect state. A transport (e.g. WebSocketTransport) has no retry
+   * logic of its own -- once its socket drops (laptop sleep, local server
+   * restart, ...) it just stays closed forever. `intentionalDisconnect`
+   * distinguishes that from a caller-initiated `disconnect()`, which must
+   * NOT trigger a reconnect loop.
+   */
+  private intentionalDisconnect = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly RECONNECT_BASE_DELAY_MS = 1000;
+  private static readonly RECONNECT_MAX_DELAY_MS = 30000;
   /**
    * Host-injected stdio transport factory (`Platform.process.createStdioTransport`).
    * Resolved by the React `AcpProvider` and injected before `connect()`. `null`
@@ -226,6 +239,11 @@ export class AcpClient {
     if (this._status === 'connecting') {
       return;
     }
+    this.intentionalDisconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.transport || this.connection) {
       this.disconnect();
     }
@@ -267,11 +285,45 @@ export class AcpClient {
       this.setStatus('disconnected');
       for (const h of this.closeHandlers) h();
       this.closeHandlers.clear();
+      this.scheduleReconnect();
     }).catch(() => {
       this.setStatus('disconnected');
       for (const h of this.closeHandlers) h();
       this.closeHandlers.clear();
+      this.scheduleReconnect();
     });
+  }
+
+  /**
+   * Schedule a reconnect attempt with exponential backoff (capped), unless
+   * the connection was closed deliberately via `disconnect()`. Safe to call
+   * repeatedly -- a pending timer is never duplicated.
+   */
+  private scheduleReconnect(): void {
+    if (this.intentionalDisconnect || !this._transportConfig || this.reconnectTimer) return;
+    const delay = Math.min(
+      AcpClient.RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt,
+      AcpClient.RECONNECT_MAX_DELAY_MS,
+    );
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.attemptReconnect();
+    }, delay);
+  }
+
+  private async attemptReconnect(): Promise<void> {
+    if (this.intentionalDisconnect || !this._transportConfig) return;
+    try {
+      await this.connect(this._transportConfig);
+      await this.initialize(this._clientInfo, this._clientCapabilities);
+    } catch {
+      // connect()/initialize() already moved status to 'error', and connect()
+      // clears intentionalDisconnect/timer state up front -- schedule the
+      // next attempt ourselves since a thrown connect() never reaches the
+      // connection.closed handler that normally does this.
+      this.scheduleReconnect();
+    }
   }
 
   /**
@@ -304,6 +356,7 @@ export class AcpClient {
     this._agentInfo = res.agentInfo ?? null;
     this._capabilities = res.agentCapabilities ?? null;
     this.setStatus('connected');
+    this.reconnectAttempt = 0;
     return res;
   }
 
@@ -407,6 +460,13 @@ export class AcpClient {
   }
 
   disconnect(): void {
+    // Set before close() -- the connection.closed handler this triggers must
+    // see this flag and skip scheduling a reconnect.
+    this.intentionalDisconnect = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.transport?.disconnect();
     this.connection?.close();
     // connection.closed handler fires async → setStatus + closeHandlers + clear

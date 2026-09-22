@@ -74,10 +74,12 @@ export function PlatformFileTreeAuto() {
 
     // Load a workspace's root tree if it is not already loaded. Safe to call
     // repeatedly — `loadFileTree` re-reads the root, which also serves as a
-    // refresh; we guard with a `loaded` check to avoid redundant work.
+    // refresh; we guard with `hasLoaded` (NOT rootNodes.length, which stays 0
+    // forever for a legitimately empty root and would make this refetch on
+    // every call) to avoid redundant work.
     const ensureLoaded = (cwd: string) => {
       const ws = fileTreeStore.getState().workspaces.get(cwd);
-      if (ws && (ws.loading || (ws.rootNodes.length > 0 && !ws.error))) return;
+      if (ws && (ws.loading || ws.hasLoaded)) return;
       loadFileTree(cwd).catch(() => {
         /* surfaced via fileTreeStore error state */
       });

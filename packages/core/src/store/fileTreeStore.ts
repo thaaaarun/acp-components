@@ -6,6 +6,13 @@ export interface WorkspaceFileTreeState {
   loading: boolean;
   error: string | null;
   directoryReader: DirectoryReadHandler | null;
+  /**
+   * Whether a load has ever settled (successfully or not) for this
+   * workspace. Distinct from `rootNodes.length > 0` -- a legitimately empty
+   * root directory settles with zero nodes, and callers need to tell that
+   * apart from "never attempted" to avoid refetching it forever.
+   */
+  hasLoaded: boolean;
 }
 
 interface FileTreeStoreState {
@@ -28,7 +35,7 @@ function getOrInit(
 ): WorkspaceFileTreeState {
   let ws = workspaces.get(cwd);
   if (!ws) {
-    ws = { rootNodes: [], loading: false, error: null, directoryReader: directoryReader ?? null };
+    ws = { rootNodes: [], loading: false, error: null, directoryReader: directoryReader ?? null, hasLoaded: false };
     workspaces.set(cwd, ws);
   } else if (directoryReader && !ws.directoryReader) {
     ws = { ...ws, directoryReader };
@@ -135,7 +142,9 @@ export const fileTreeStore = createStore<FileTreeStoreState>((set) => ({
     set((state) => {
       const workspaces = new Map(state.workspaces);
       const ws = getOrInit(workspaces, cwd);
-      workspaces.set(cwd, { ...ws, error });
+      // A genuine error (not the pre-load `setError(cwd, null)` clear) means
+      // this load attempt has settled.
+      workspaces.set(cwd, { ...ws, error, ...(error !== null ? { hasLoaded: true } : {}) });
       return { workspaces };
     });
   },
@@ -149,6 +158,7 @@ export const fileTreeStore = createStore<FileTreeStoreState>((set) => ({
         rootNodes: nodes,
         loading: false,
         error: null,
+        hasLoaded: true,
       });
       return { workspaces };
     });

@@ -3,6 +3,7 @@ import type { StdioTransportFactory } from './client/AcpClient';
 import { acpStore } from './store/acpStore';
 import { sessionStore } from './store/sessionStore';
 import { skillStore } from './store/skillStore';
+import { loadSession } from './actions/sessions';
 import type { ToolCallState } from './types';
 import type { AgentConfig } from './types';
 import type { RequestPermissionResponse, ClientCapabilities, ContentBlock } from '@agentclientprotocol/sdk';
@@ -351,6 +352,26 @@ export function createAcpProvider(
     return unsubClose;
   }
 
+  /**
+   * Re-run `session/load` for every session this agent had open, against the
+   * fresh connection a reconnect just established. Best-effort per session --
+   * one failure (e.g. a session the new process genuinely can't find) must
+   * not block the others from recovering.
+   */
+  async function reloadSessionsAfterReconnect(client: AcpClient, agentId: string): Promise<void> {
+    const { workspaces } = acpStore.getState();
+    for (const ws of workspaces.values()) {
+      for (const meta of ws.sessions.values()) {
+        if (meta.agentId !== agentId || !meta.loaded) continue;
+        try {
+          await loadSession(client, meta.id, ws.cwd);
+        } catch (err) {
+          console.error(`Failed to reload session ${meta.id} after reconnect:`, err);
+        }
+      }
+    }
+  }
+
   async function connectAgent(config: AgentConfig): Promise<void> {
     const client = new AcpClient();
 
@@ -362,9 +383,22 @@ export function createAcpProvider(
     // Register client immediately so getClient works during connection
     scopedClientRegistry.set(config.id, client);
 
-    // Status handler
+    // Status handler. AcpClient's own transport-level auto-reconnect only
+    // restores the *connection* -- codex-acp (and presumably other agents)
+    // spawn a fresh process per connection with no memory of sessions from
+    // before the drop, so prompting a session that predates the reconnect
+    // fails outright ("Internal error") until it's explicitly re-loaded.
+    // Detect a reconnect (a 'connected' transition after the first one) and
+    // reload every session this agent had open so the UI keeps working
+    // without the user noticing the connection ever dropped.
+    let hasConnectedOnce = false;
     const unsubStatus = client.onStatusChange((status) => {
       acpStore.getState().updateAgent(config.id, { status });
+      if (status !== 'connected') return;
+      if (hasConnectedOnce) {
+        void reloadSessionsAfterReconnect(client, config.id);
+      }
+      hasConnectedOnce = true;
     });
 
     // Session update handler
